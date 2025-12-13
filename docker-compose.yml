@@ -1,0 +1,21 @@
+services:
+  dsr:
+    build: .
+    container_name: dsr
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist DB in a directory mount (more reliable than bind-mounting a file
+      # that might not exist yet).
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - DSR_DB_PATH=/app/data/dsr.db
+    networks:
+      - dsr
+
+networks:
+  dsr:
+    name: dsr

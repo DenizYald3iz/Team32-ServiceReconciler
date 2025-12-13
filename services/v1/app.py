@@ -10,3 +10,8 @@ def read_root():
 def health_check():
     # Yönetici (Manager) buraya istek atacak
     return {"status": "healthy", "version": "v1"}
+
+
+@app.get("/version")
+def version():
+    return {"version": "v1"}
