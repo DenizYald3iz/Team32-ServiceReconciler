@@ -1,71 +1,70 @@
-# Dynamic Service Reconciler (DSR)
-Seamless inter-microservice transition system (single-node demo).
+# Perfect System (Tron edition) — Plus
 
-## What you get
-- **Health monitoring**: polls each instance's health endpoint.
-- **Self-healing**: restarts/replace containers after consecutive failed checks.
-- **Version rollouts**: canary-style rollout by gradually changing routing weights.
-- **Load balancing**: in-process gateway does weighted version selection + round-robin across instances.
-- **Status + audit trail**: SQLite DB + `/events` endpoint + simple `/dashboard` page.
+A tiny **desired-state orchestrator** demo inspired by *Tron* and *Kubernetes*.
+You **declare Desired** (via YAML) and the **Controller reconciles Actual** until they match.
 
-## Project structure
-```
-.
-├─ dsr/                # core library modules
-├─ main.py             # FastAPI entrypoint
-├─ cli.py              # tiny CLI for registering & rolling out
-├─ requirements.txt
-└─ examples/
-   └─ example_service/ # a tiny FastAPI microservice with /health + /version
-```
+## What’s new vs baseline
+- **Guided Tour** & **Help Modal** (self-explanatory UI)
+- **Play Demo** button (v1 → v2 rollout → chaos → self-heal)
+- **Blue/Green** and **Canary** rollouts
+- **Readiness vs Liveness** probes, **exponential backoff** on restarts
+- **Simulated Autoscaling** with a tiny HPA-like controller
+- **Explain Mode** (friendly reasons appended to events)
+- **Observability mini-charts** (ready pods / restarts)
+- **Diff view**: Desired vs Actual per service
+- **OpenAPI /docs** for API (Swagger UI)
+- **Auth key** support for mutating endpoints (optional)
 
-## Quick start (recommended: docker-compose)
-Prereqs: Docker + docker-compose.
-
-1) Build demo service images:
+## Quick start
 ```bash
-docker build -t dsr-svc:v1 services/v1
-docker build -t dsr-svc:v2 services/v2
-```
-
-2) Start DSR (runs inside Docker and controls Docker via the mounted socket):
-```bash
-cp .env.example .env  # optional
-mkdir -p data         # persistent SQLite DB (docker-compose bind mount)
 docker compose up --build
+# UI: http://localhost:8080
+# API docs: http://localhost:8080/docs
 ```
-
-3) Register a service version (from your host machine):
+Try the **Play Demo** button in the header, or:
 ```bash
-python cli.py register --service example --version v1 --image dsr-svc:v1 --internal-port 80 --replicas 2 --weight 100
+# Apply v1
+curl -sS -H 'Content-Type: application/yaml' --data-binary @examples/api-v1.yaml http://localhost:8080/apply | jq
+# Apply v2 (canary)
+curl -sS -H 'Content-Type: application/yaml' --data-binary @examples/api-canary.yaml http://localhost:8080/apply | jq
+# Chaos
+curl -X POST 'http://localhost:8080/chaos/kill?service=api&count=1' | jq
 ```
 
-4) Call through the gateway:
-```bash
-curl http://localhost:8000/gateway/example/version
-```
+## Mental model (30 sec)
+- **Service**: desired **replicas**, **image digest**, **env**, **rollout** strategy
+- **Pod**: an instance belonging to a service (simulated by the Agent)
+- **Controller**: reconcile loop (every 1s) → spawn/kill/restart pods, perform rollouts, autoscale
+- **Readiness**: pod is *ready* to receive traffic
+- **Liveness**: pod is *alive*; failing liveness triggers restarts with backoff
+- **Events**: append-only log of what happened (filterable, explainable)
 
-5) Canary rollout to v2:
-```bash
-python cli.py rollout --service example --to-version v2 --image dsr-svc:v2 --internal-port 80 --replicas 2 --canary-weight 10 --step-percent 25 --step-interval-s 10 --auto
-```
+## Examples
+- `examples/api-v1.yaml` — baseline v1
+- `examples/api-v2.yaml` — blue/green v2
+- `examples/api-canary.yaml` — canary 25%→50%→100% with pauses
 
-Open the dashboard:
-- http://localhost:8000/dashboard
+## Feature flags & env
+- `X_API_KEY` (api+controller+agent): set to require `X-API-Key` header for mutating routes
+- `TICK_MS` (controller): reconcile period (default 1000ms)
 
-## Email alerts (optional)
-Set these env vars before starting `uvicorn`:
-```
-DSR_ENABLE_EMAIL=true
-DSR_SMTP_HOST=smtp.gmail.com
-DSR_SMTP_PORT=587
-DSR_SMTP_USER=you@gmail.com
-DSR_SMTP_PASSWORD=YOUR_APP_PASSWORD
-DSR_EMAIL_FROM=you@gmail.com
-DSR_EMAIL_TO=receiver@gmail.com
-```
+### Email alerts (optional)
+If configured, the **Controller** sends an email when a service transitions:
+- **DOWN**: desired replicas > 0 and **ready pods < desired replicas** (degraded counts as down)
+- **UP**: ready pods back to **>= desired replicas**
 
-## Notes
-- DSR expects health endpoints to return JSON `{ "status": "healthy" }`.
-- For security, health checks are **path-based** (e.g. `/health`) and combined with an internally computed container URL.
-- This is a teaching/demo project (not a production orchestrator).
+Configure via env vars on the `controller` service (see `docker-compose.yml`):
+- `SMTP_HOST`, `SMTP_PORT` (default `587`), `SMTP_SECURE` (default `false`, or `true` for port `465`)
+- `SMTP_USER`, `SMTP_PASS` (optional)
+- `EMAIL_FROM` (default `perfect-system@localhost`)
+- `EMAIL_TO` (comma-separated recipients)
+- `EMAIL_SUBJECT_PREFIX` (default `[Perfect System] `)
+- `PUBLIC_UI_URL` (optional link in the email)
+
+Alert behavior knobs:
+- `ALERT_DOWN_CONFIRM_MS` / `ALERT_UP_CONFIRM_MS` (default `0`): require a state to persist before alerting
+- `ALERT_COOLDOWN_MS` (default `0`): minimum time between emails for a service
+- `ALERT_STARTUP_GRACE_MS` (default `5000`): suppress alerts right after scaling from 0 → >0
+
+---
+© for homework/demo use. Have fun on the Grid! 🛡️
