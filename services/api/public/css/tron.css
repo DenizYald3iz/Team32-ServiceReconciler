@@ -1,0 +1,24 @@
+:root {
+  --tron-bg: #0a121a;
+  --tron-grid: rgba(0,255,255,0.08);
+  --tron-light: #61e2ff;
+  --tron-accent: #00ffc6;
+  --tron-warn: #ff9f43;
+  --tron-bad: #ff5c7a;
+  --tron-good: #00ff9d;
+}
+* { box-sizing: border-box; }
+.grid-bg {
+  position: fixed; inset: 0; background-image:
+    linear-gradient(var(--tron-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tron-grid) 1px, transparent 1px);
+  background-size: 40px 40px; pointer-events: none;
+}
+.neon-border { border: 1px solid var(--tron-light); border-radius: 12px; box-shadow: 0 0 18px rgba(0,255,255,0.25) inset; }
+.neon-btn { border:1px solid var(--tron-accent); border-radius:10px; padding:8px 12px; }
+.status-dot { display:inline-block; width:12px; height:12px; border:2px solid #29424f; border-radius:50%; background:currentColor; box-shadow:0 0 10px currentColor; }
+.pulse { animation: pulse 2s infinite; }
+@keyframes pulse { 0%{opacity:.8} 50%{opacity:1} 100%{opacity:.8} }
+.modal { position: fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); }
+.modal .modal-body { background:#0f1a22; padding:20px; border-radius:12px; max-width:640px; width:92%; border:1px solid var(--tron-light); }
+.tooltip { border-bottom: 1px dotted #9bd5ff; }

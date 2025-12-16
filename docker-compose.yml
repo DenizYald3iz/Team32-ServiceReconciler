@@ -1,0 +1,48 @@
+services:
+  api:
+    build: ./services/api
+    ports: ["8080:8080"]
+    environment:
+      - CONTROLLER_URL=http://controller:8090
+      - AGENT_URL=http://agent:8070
+      - STORE_PATH=/data/state.json
+      # - X_API_KEY=changeme
+    depends_on: [controller, agent]
+    volumes:
+      - clusterdata:/data
+  controller:
+    build: ./services/controller
+    environment:
+      - API_URL=http://api:8080
+      - AGENT_URL=http://agent:8070
+      - TICK_MS=1000
+      - STORE_PATH=/data/state.json
+      # - X_API_KEY=changeme
+      # --- Email alerting (optional) ---
+      # Sends an email when a service transitions DOWN (0 ready & desired>0)
+      # and when it transitions back UP.
+      # - SMTP_HOST=smtp.gmail.com
+      # - SMTP_PORT=587
+      # - SMTP_SECURE=false
+      # - SMTP_USER=yourmail@gmail.com
+      # - SMTP_PASS=xxxx xxxx xxxx xxxx
+      # - EMAIL_FROM=NeonReconciler <yourmail@gmail.com>
+      # - EMAIL_TO=mailtosend@gmail.com
+      # - EMAIL_SUBJECT_PREFIX=[NeonReconciler]
+      # - ALERT_DOWN_CONFIRM_MS=0
+      # - ALERT_UP_CONFIRM_MS=0
+      # - ALERT_COOLDOWN_MS=0
+      # - ALERT_STARTUP_GRACE_MS=5000
+    depends_on: [agent]
+    volumes:
+      - clusterdata:/data
+  agent:
+    build: ./services/agent
+    ports: ["8070:8070"]
+    environment:
+      - AGENT_PORT=8070
+      # - X_API_KEY=changeme
+  # demo app is simulated by Agent; no real container needed
+
+volumes:
+  clusterdata:

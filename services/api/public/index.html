@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style> h1, h2, h3, .neon-chip { font-family:"Orbitron", ui-sans-serif, system-ui; } </style>
+  <title>Perfect System · Tron UI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./css/tron.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="min-h-screen" style="background-color: var(--tron-bg);">
+  <div class="grid-bg"></div>
+
+  <header class="max-w-7xl mx-auto px-6 pt-8 pb-4 flex items-start justify-between">
+    <div>
+      <h1 class="text-3xl md:text-4xl font-bold" style="color:#cfe9ff">Perfect System</h1>
+      <p class="mt-1 text-sm md:text-base" style="color:#9db0c7">
+        A tiny desired-state orchestrator: <span class="tooltip" title="You declare the target.">Desired</span> →
+        <span class="tooltip" title="What is actually running right now.">Actual</span>.
+        The Controller reconciles until they match.
+      </p>
+      <div class="mt-3 flex gap-2">
+        <button id="playDemo" class="neon-btn" style="color:#031b1a;background:linear-gradient(90deg,#00ffc6,#00e1ff);">▶ Play Demo</button>
+        <button id="tourBtn" class="neon-btn" style="color:#9bd5ff">What am I seeing?</button>
+        <label class="inline-flex items-center gap-2 text-sm" style="color:#cfe9ff">
+          <input id="explainToggle" type="checkbox" class="h-4 w-4" /> Explain mode
+        </label>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="connDot" class="status-dot" style="color:#7a8fa6"></span>
+      <span id="connText" class="text-sm" style="color:#9db0c7">Connecting…</span>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 pb-10 space-y-6">
+    <!-- Actions -->
+    <section class="grid md:grid-cols-3 gap-4">
+      <div class="neon-border p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl" style="color:#9bd5ff">Apply YAML</h2>
+          <div class="flex gap-2">
+            <button id="applyV1" class="neon-btn" style="color:#9bd5ff">v1</button>
+            <button id="applyV2" class="neon-btn" style="color:#9bd5ff">v2</button>
+            <button id="applyCanary" class="neon-btn" style="color:#9bd5ff">Canary</button>
+          </div>
+        </div>
+        <textarea id="yamlInput" class="mt-3 w-full h-40 bg-[#081018] text-[#cfe9ff] p-3 rounded" placeholder="Paste YAML here…"></textarea>
+        <div class="mt-2 flex gap-2">
+          <button id="applyYamlBtn" class="neon-btn" style="color:#9bd5ff">Apply</button>
+          <button id="copyCurl" class="neon-btn" style="color:#9bd5ff">Copy curl</button>
+        </div>
+        <div class="mt-2 flex gap-2">
+          <button id="scaleDown" class="neon-btn" style="color:#9bd5ff">−1</button>
+          <button id="scaleUp" class="neon-btn" style="color:#9bd5ff">+1</button>
+        </div>
+      </div>
+      <div class="neon-border p-4">
+        <h2 class="text-xl" style="color:#9bd5ff">Chaos</h2>
+        <div class="mt-2 flex gap-2">
+          <select id="chaosService" class="bg-[#0b1a24] text-[#cfe9ff] p-2 rounded">
+            <option>api</option>
+          </select>
+          <button id="killOne" class="neon-btn" style="color:#ff9f43">Kill 1</button>
+          <button id="killThree" class="neon-btn" style="color:#ff9f43">Kill 3</button>
+        </div>
+      </div>
+      <div class="neon-border p-4">
+        <h2 class="text-xl" style="color:#9bd5ff">Simulated Load</h2>
+        <div class="mt-2 flex gap-2 items-center">
+          <input id="cpuRange" type="range" min="0" max="100" value="0" class="w-full" />
+          <span id="cpuVal" class="text-[#cfe9ff]">0%</span>
+          <button id="applyLoad" class="neon-btn" style="color:#9bd5ff">Set</button>
+        </div>
+        <p class="text-xs mt-1" style="color:#7aa8c7">Autoscaler reacts if targetCPU is set (see examples).</p>
+      </div>
+    </section>
+
+    <!-- Diff + Services -->
+    <section class="grid md:grid-cols-2 gap-4">
+      <div class="neon-border p-4">
+        <h2 class="text-xl mb-2" style="color:#9bd5ff">Services (Desired vs Actual)</h2>
+        <div id="services"></div>
+      </div>
+      <div class="neon-border p-4">
+        <h2 class="text-xl mb-2" style="color:#9bd5ff">Pods</h2>
+        <div id="pods" class="grid sm:grid-cols-2 gap-2"></div>
+      </div>
+    </section>
+
+    <!-- Events -->
+    <section class="neon-border p-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl" style="color:#9bd5ff">Events</h2>
+        <div class="flex gap-2">
+          <select id="evtFilter" class="bg-[#0b1a24] text-[#cfe9ff] p-1 rounded">
+            <option value="">All</option>
+            <option>rollout</option>
+            <option>health</option>
+            <option>scaling</option>
+            <option>chaos</option>
+          </select>
+          <label class="inline-flex items-center gap-2 text-sm" style="color:#cfe9ff">
+            <input id="autoRefresh" type="checkbox" class="h-4 w-4" checked /> Auto refresh
+          </label>
+        </div>
+      </div>
+      <div id="events" class="mt-2 max-h-72 overflow-auto"></div>
+    </section>
+  </main>
+
+  <!-- Help modal -->
+  <div id="helpModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div class="modal-body neon-border">
+      <h2 id="helpTitle" class="text-2xl" style="color:#9bd5ff">Perfect System (Tron)</h2>
+      <p class="mt-2 text-sm" style="color:#cfe9ff">Declare <b>Desired</b>. The Controller reconciles <b>Actual</b> until they match.</p>
+      <ul class="list-disc pl-5 text-sm mt-2" style="color:#9bd5ff">
+        <li><b>Apply YAML:</b> sets Desired.</li>
+        <li><b>Services/Pods:</b> shows Actual.</li>
+        <li><b>Events:</b> tells you what happened (rollouts, health, scaling, chaos).</li>
+        <li><b>Try this:</b> Play Demo (v1 → v2 → chaos).</li>
+      </ul>
+      <div class="mt-3 flex gap-2">
+        <button id="playDemo2" class="neon-btn" style="color:#031b1a;background:linear-gradient(90deg,#00ffc6,#00e1ff);">▶ Play Demo</button>
+        <button id="closeHelp" class="neon-btn" style="color:#9bd5ff">Close</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = (id)=>document.getElementById(id);
+const connDot = $('connDot'); const connText = $('connText');
+const yamlInput = $('yamlInput'); const servicesDiv=$('services'); const podsDiv=$('pods'); const eventsDiv=$('events');
+const autoRefresh = $('autoRefresh'); const tourBtn=$('tourBtn'); const helpModal=$('helpModal');
+const explainToggle=$('explainToggle'); const cpuRange=$('cpuRange'); const cpuVal=$('cpuVal');
+
+let V1 = `apiVersion: v1
+kind: Service
+metadata: { name: api }
+spec:
+  image: local://demo@v1
+  replicas: 3
+  env:
+    - { name: HEALTHY, value: "1" }
+  readinessProbe:
+    httpGet: { path: /healthz }
+    initialDelaySeconds: 1
+    periodSeconds: 2
+    failureThreshold: 3
+  livenessProbe:
+    httpGet: { path: /livez }
+    initialDelaySeconds: 1
+    periodSeconds: 2
+    failureThreshold: 3
+  rollout:
+    strategy: BlueGreen
+`;
+let V2 = `apiVersion: v1
+kind: Service
+metadata: { name: api }
+spec:
+  image: local://demo@v2
+  replicas: 3
+  env:
+    - { name: HEALTHY, value: "1" }
+  readinessProbe:
+    httpGet: { path: /healthz }
+    initialDelaySeconds: 1
+    periodSeconds: 2
+    failureThreshold: 3
+  livenessProbe:
+    httpGet: { path: /livez }
+    initialDelaySeconds: 1
+    periodSeconds: 2
+    failureThreshold: 3
+  rollout:
+    strategy: BlueGreen
+`;
+let CAN = `apiVersion: v1
+kind: Service
+metadata: { name: api }
+spec:
+  image: local://demo@v2
+  replicas: 4
+  env:
+    - { name: HEALTHY, value: "1" }
+  readinessProbe:
+    httpGet: { path: /healthz }
+    initialDelaySeconds: 1
+    periodSeconds: 2
+    failureThreshold: 3
+  livenessProbe:
+    httpGet: { path: /livez }
+    initialDelaySeconds: 1
+    periodSeconds: 2
+    failureThreshold: 3
+  rollout:
+    strategy: Canary
+    steps:
+      - { percent: 25 }
+      - { percent: 50 }
+      - { percent: 100 }
+    pauseSeconds: 5
+`;
+
+yamlInput.value = V1;
+
+cpuRange.addEventListener('input', ()=> cpuVal.textContent = cpuRange.value + '%');
+
+function playClick(){ /* optional sfx; placeholder */ }
+
+function row(html){ const d=document.createElement('div'); d.innerHTML=html; return d.firstElementChild; }
+
+function render(state){
+  // conn status
+  connDot.style.color = '#00ff9d'; connText.textContent='Live';
+  // services diff
+  servicesDiv.innerHTML='';
+  for (const [name, svc] of Object.entries(state.services)){
+    const ready = Object.values(state.pods).filter(p=>p.service===name && p.ready).length;
+    const desired = svc.replicas;
+    const digestActual = (Object.values(state.pods).find(p=>p.service===name)?.image_digest)||'(none)';
+    const diffHTML = `<div class="p-3 rounded border border-[#1b3a48] mb-2">
+      <div class="flex items-center justify-between">
+        <div class="text-[#cfe9ff]"><b>${name}</b></div>
+        <div class="text-sm"><span style="color:#9bd5ff">Desired</span>: ${desired} · ${svc.digest} | <span style="color:#9bd5ff">Actual</span>: ${ready} · ${digestActual}</div>
+      </div>
+      <div class="mt-1 h-2 bg-[#0b1a24] rounded overflow-hidden">
+        <div style="width:${Math.min(100, (ready/Math.max(1,desired))*100)}%; background:#00ff9d; height:100%"></div>
+      </div>
+    </div>`;
+    servicesDiv.appendChild(row(diffHTML));
+  }
+  // pods
+  podsDiv.innerHTML='';
+  const pods = Object.values(state.pods).sort((a,b)=>a.start_ts-b.start_ts);
+  for (const p of pods){
+    const clr = p.ready ? '#00ff9d' : '#ff5c7a';
+    podsDiv.appendChild(row(`<div class="p-3 rounded border border-[#1b3a48]">
+      <div class="flex items-center justify-between">
+        <div class="text-[#cfe9ff]"><b>${p.service}</b> · <span style="color:${clr}">${p.ready?'Ready':'NotReady'}</span></div>
+        <div class="text-xs" style="color:#9bd5ff">digest ${p.image_digest} · ${p.id.slice(0,6)}</div>
+      </div>
+      <div class="text-xs mt-1" style="color:#7aa8c7">port ${p.port} · restarts ${p.restarts||0}</div>
+    </div>`));
+  }
+  // events
+  const filt = $('evtFilter').value;
+  eventsDiv.innerHTML='';
+  const evs = state.events.slice(-200).reverse();
+  for (const e of evs){
+    if (filt && !(e.msg.toLowerCase().includes(filt) || (e.explain||'').toLowerCase().includes(filt))) continue;
+    const when = new Date(e.ts).toLocaleTimeString();
+    const explain = (state.explain || $('explainToggle').checked) && e.explain ? ` — <span style="color:#9bd5ff">${e.explain}</span>` : '';
+    eventsDiv.appendChild(row(`<div class="text-sm py-1 border-b border-[#142833]" style="color:#cfe9ff">
+      <span style="color:#7aa8c7">${when}</span> [${e.level}] ${e.svc||'-'} ${e.pod||''}: ${e.msg}${explain}
+    </div>`));
+  }
+}
+
+async function fetchState(){ const r = await fetch('/state'); const s = await r.json(); render(s); }
+
+// SSE live updates (best effort)
+try {
+  const es = new EventSource('/events');
+  es.onmessage = (ev)=> { const s = JSON.parse(ev.data); render(s); };
+  es.onerror = ()=> { connDot.style.color='#7a8fa6'; connText.textContent='Disconnected'; };
+} catch{}
+
+async function applyYaml(y){ await fetch('/apply', { method:'POST', headers:{'Content-Type':'application/yaml'}, body:y }); playClick(); }
+async function kill(service, count){ await fetch('/chaos/kill?service='+encodeURIComponent(service)+'&count='+count, { method:'POST' }); playClick(); }
+async function scale(service, delta){ await fetch('/scale?service='+encodeURIComponent(service)+'&delta='+delta, { method:'POST' }); playClick(); }
+async function setLoad(service, cpu){ await fetch('/load?service='+encodeURIComponent(service)+'&cpu='+cpu, { method:'POST' }); }
+
+$('applyV1').onclick = ()=> applyYaml(V1);
+$('applyV2').onclick = ()=> applyYaml(V2);
+$('applyCanary').onclick = ()=> applyYaml(CAN);
+$('applyYamlBtn').onclick = ()=> applyYaml(yamlInput.value);
+$('scaleDown').onclick = ()=> scale('api', -1);
+$('scaleUp').onclick = ()=> scale('api', 1);
+$('copyCurl').onclick = ()=> {
+  const cmd = `curl -X POST http://localhost:8080/apply -H 'Content-Type: application/yaml' --data-binary @- <<'YAML'\n${yamlInput.value}\nYAML`;
+  navigator.clipboard.writeText(cmd);
+};
+document.addEventListener('keydown', (e)=> e.key==='y' && yamlInput.focus());
+
+$('killOne').onclick = ()=> kill($('chaosService').value, 1);
+$('killThree').onclick = ()=> kill($('chaosService').value, 3);
+$('applyLoad').onclick = ()=> setLoad('api', parseInt(cpuRange.value,10));
+
+// Guided tour
+tourBtn.onclick = ()=> helpModal.classList.remove('hidden');
+$('closeHelp').onclick = ()=> helpModal.classList.add('hidden');
+$('playDemo2').onclick = ()=> playSequence();
+
+$('playDemo').onclick = ()=> playSequence();
+async function playSequence(){
+  helpModal.classList.add('hidden');
+  await applyYaml(V1);
+  await sleep(3000);
+  await applyYaml(V2);
+  await sleep(4000);
+  await applyYaml(CAN);
+  await sleep(4000);
+  await kill('api', 1);
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// polling
+let timer = null;
+autoRefresh.addEventListener('change', () => {
+  if (autoRefresh.checked) timer = setInterval(fetchState, 1500);
+  else { clearInterval(timer); timer = null; }
+});
+fetchState();
+if (autoRefresh.checked) timer = setInterval(fetchState, 1500);
+</script>
+</body>
+</html>
