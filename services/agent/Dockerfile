@@ -4,4 +4,4 @@ COPY package.json ./
 RUN npm install
 COPY . .
 EXPOSE 8070
-CMD ["node","index.js"]
+CMD ["node","--no-warnings","--unhandled-rejections=strict","index.js"]

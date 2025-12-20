@@ -12,6 +12,7 @@ services:
       - clusterdata:/data
   controller:
     build: ./services/controller
+    ports: ["8090:8090"]
     environment:
       - API_URL=http://api:8080
       - AGENT_URL=http://agent:8070

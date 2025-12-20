@@ -22,3 +22,46 @@
 .modal { position: fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); }
 .modal .modal-body { background:#0f1a22; padding:20px; border-radius:12px; max-width:640px; width:92%; border:1px solid var(--tron-light); }
 .tooltip { border-bottom: 1px dotted #9bd5ff; }
+
+/* Metrics Gauges */
+.gauge-card {
+  background: rgba(10, 18, 26, 0.6);
+  border: 1px solid rgba(0, 255, 197, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.gauge-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: #00ffc6;
+  font-family: 'Orbitron', monospace;
+  margin: 8px 0;
+}
+
+.gauge-label {
+  font-size: 12px;
+  color: #9bd5ff;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.gauge-bar {
+  width: 100%;
+  height: 6px;
+  background: #0b1a24;
+  border-radius: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.gauge-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00ffc6, #00ff9d);
+  transition: width 0.3s ease;
+}

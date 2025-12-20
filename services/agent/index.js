@@ -31,8 +31,31 @@ app.post('/spawn', requireAuth, (req, res)=>{
 
 app.post('/kill', requireAuth, (req,res)=>{
   const { podId } = req.body;
-  for (const [port, p] of pods.entries()) if (p.id===podId) pods.delete(port);
-  res.json({ ok:true });
+  const gracePeriod = 3 * 1000;  // 3 saniye test için (normalde 30)
+  
+  console.log(`[KILL] Received kill request for pod: ${podId}`);
+  
+  // Pod'u bul
+  for (const [port, p] of pods.entries()) {
+    if (p.id === podId) {
+      // Hemen silme! Graceful shutdown başlat:
+      p.terminating = true;                           // İşaretle
+      p.terminateAt = Date.now() + gracePeriod;       // 30s sonra sil
+      
+      console.log(`[GRACEFUL] Pod ${podId} graceful shutdown başladı (${gracePeriod/1000}s grace period).`);
+      
+      // 30 saniye sonra pod'u really sil
+      setTimeout(() => {
+        pods.delete(port);  // Artık tamamen sil
+        console.log(`[DELETED] Pod ${podId} grace period tamamlandı, silindi.`);
+      }, gracePeriod);
+      
+      return res.json({ ok: true, state: 'terminating' });
+    }
+  }
+  
+  console.log(`[KILL] Pod ${podId} not found!`);
+  res.status(404).json({ error: 'pod not found' });
 });
 
 // Toggle health by service (for future scenarios)
@@ -47,9 +70,15 @@ app.get('/probe', (req,res)=>{
   const p = pods.get(port);
   if (!p) return res.status(404).end();
   const now = Date.now();
+  
+  // YENİ: Terminating pod'ları kontrol et
+  if (p.terminating) {
+    return res.status(503).end('terminating - draining traffic');
+    // 503 = "Service Unavailable" = Load balancer'a "bu pod'a yönlendir.me" der
+  }
+  
   const ready = p.healthy && now>=p.readyAfter;
   const live = p.healthy && now>=p.liveAfter;
-  // combine: if not live -> 500; if live but not ready -> 503; if ready -> 200
   if (!live) return res.status(500).end('not live');
   if (!ready) return res.status(503).end('not ready');
   res.status(200).end('ok');

@@ -4,6 +4,7 @@ metadata: { name: api }
 spec:
   image: local://demo@v1
   replicas: 3
+  terminationGracePeriodSeconds: 30
   env:
     - { name: HEALTHY, value: "1" }
   readinessProbe:

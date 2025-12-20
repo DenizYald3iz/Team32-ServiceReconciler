@@ -191,20 +191,28 @@ async function reconcileOnce(){
       if (p.service!==svc.name) continue;
       const ok = await agentProbe(p);
       p._lastProbe = now();
+      
+      // Check if pod is still within initialDelaySeconds grace period
+      const livenessInitialDelay = (svc.livenessProbe?.initialDelaySeconds ?? 1) * 1000;
+      const isWithinInitialDelay = (now() - p.start_ts) < livenessInitialDelay;
+      
       if (!ok) {
-        p._fail = (p._fail||0)+1;
-        // Liveness
-        const lthr = svc.livenessProbe?.failureThreshold ?? 3;
-        if (p._fail>=lthr) {
-          p.restarts = (p.restarts||0)+1;
-          state.metrics.restarts[svc.name] = (state.metrics.restarts[svc.name]||0)+1;
-          const delay = backoffDelay(p);
-          p.backoffUntil = now()+delay;
-          p.backoffAttempt = (p.backoffAttempt||0)+1;
-          recordEvent(state, 'WARN', svc.name, p.id, 'Liveness failed — restarting', `Backoff ${delay}ms before respawn.`);
-          await agentKill(p.id);
-          delete state.pods[p.id];
-          continue;
+        // Don't count failures during initialDelaySeconds as restart-worthy
+        if (!isWithinInitialDelay) {
+          p._fail = (p._fail||0)+1;
+          // Liveness
+          const lthr = svc.livenessProbe?.failureThreshold ?? 3;
+          if (p._fail>=lthr) {
+            p.restarts = (p.restarts||0)+1;
+            state.metrics.restarts[svc.name] = (state.metrics.restarts[svc.name]||0)+1;
+            const delay = backoffDelay(p);
+            p.backoffUntil = now()+delay;
+            p.backoffAttempt = (p.backoffAttempt||0)+1;
+            recordEvent(state, 'WARN', svc.name, p.id, 'Liveness failed — restarting', `Backoff ${delay}ms before respawn.`);
+            await agentKill(p.id);
+            delete state.pods[p.id];
+            continue;
+          }
         }
         // Readiness
         p.ready = false;
@@ -313,7 +321,77 @@ setInterval(()=> { reconcileOnce().catch(err=>console.error('reconcile error', e
 
 // metrics endpoint
 const server = http.createServer((req, res)=>{
-  if (req.url==='/metrics') { res.writeHead(200, {'Content-Type':'text/plain'}); res.end('controller_up 1\n'); }
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+  
+  if (req.url==='/metrics') {
+    try {
+      const state = readStore();
+      let metrics = '';
+      
+      // Header comments (Prometheus format)
+      metrics += '# HELP controller_up Controller is running\n';
+      metrics += '# TYPE controller_up gauge\n';
+      metrics += 'controller_up 1\n\n';
+      
+      // Per-service metrics
+      metrics += '# HELP api_pods_ready Ready pods per service\n';
+      metrics += '# TYPE api_pods_ready gauge\n';
+      
+      metrics += '# HELP api_pods_desired Desired replicas per service\n';
+      metrics += '# TYPE api_pods_desired gauge\n';
+      
+      metrics += '# HELP api_pods_total Total running pods per service\n';
+      metrics += '# TYPE api_pods_total gauge\n';
+      
+      metrics += '# HELP api_restarts_total Total pod restarts per service\n';
+      metrics += '# TYPE api_restarts_total counter\n';
+      
+      metrics += '# HELP api_events_total Events by service and level\n';
+      metrics += '# TYPE api_events_total counter\n';
+      
+      // Generate actual metric lines
+      for (const svc of Object.values(state.services)) {
+        const ready = readyCount(state, svc);
+        const total = podsFor(state, svc).length;
+        const restarts = state.metrics.restarts[svc.name] || 0;
+        
+        metrics += `api_pods_ready{service="${svc.name}"} ${ready}\n`;
+        metrics += `api_pods_desired{service="${svc.name}"} ${svc.replicas}\n`;
+        metrics += `api_pods_total{service="${svc.name}"} ${total}\n`;
+        metrics += `api_restarts_total{service="${svc.name}"} ${restarts}\n`;
+      }
+      
+      // Event counts by service and level
+      metrics += '\n';
+      const eventCounts = {};
+      for (const event of state.events) {
+        const svc = event.svc || 'unknown';
+        const level = event.level || 'INFO';
+        const key = `${svc}:${level}`;
+        eventCounts[key] = (eventCounts[key] || 0) + 1;
+      }
+      
+      for (const [key, count] of Object.entries(eventCounts)) {
+        const [svc, level] = key.split(':');
+        metrics += `api_events_total{service="${svc}",level="${level}"} ${count}\n`;
+      }
+      
+      res.writeHead(200, {'Content-Type':'text/plain'});
+      res.end(metrics);
+    } catch (e) {
+      res.writeHead(500, {'Content-Type':'text/plain'});
+      res.end(`Error: ${e.message}\n`);
+    }
+  }
   else { res.writeHead(404); res.end(); }
 });
 server.listen(8090, ()=> console.log('Controller listening on :8090'));

@@ -89,6 +89,14 @@
       </div>
     </section>
 
+    <!-- Metrics Dashboard -->
+    <section class="neon-border p-4">
+      <h2 class="text-xl mb-2" style="color:#9bd5ff">Metrics Dashboard</h2>
+      <div id="metricsGrid" class="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+        <!-- Populated by JavaScript -->
+      </div>
+    </section>
+
     <!-- Events -->
     <section class="neon-border p-4">
       <div class="flex items-center justify-between">
@@ -257,6 +265,89 @@ function render(state){
       <span style="color:#7aa8c7">${when}</span> [${e.level}] ${e.svc||'-'} ${e.pod||''}: ${e.msg}${explain}
     </div>`));
   }
+  
+  // Render metrics
+  renderMetrics();
+}
+
+async function renderMetrics() {
+  try {
+    const resp = await fetch('/metrics', { headers: {'Accept': 'text/plain'} });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    console.log('[DEBUG] Metrics raw:', text.slice(0, 200)); // First 200 chars
+    
+    const metrics = parseMetrics(text);
+    console.log('[DEBUG] Parsed metrics:', metrics);
+    
+    const metricsGrid = $('metricsGrid');
+    metricsGrid.innerHTML = '';
+    
+    // Ready pods gauge
+    const podsReady = metrics['api_pods_ready{service="api"}'] || 0;
+    const podsDesired = metrics['api_pods_desired{service="api"}'] || 1;
+    const readyPct = Math.round((podsReady / Math.max(1, podsDesired)) * 100);
+    metricsGrid.appendChild(row(`
+      <div class="gauge-card">
+        <div class="gauge-label">Ready Pods</div>
+        <div class="gauge-value">${podsReady}/${podsDesired}</div>
+        <div class="gauge-bar"><div class="gauge-fill" style="width: ${readyPct}%"></div></div>
+        <div class="text-xs" style="color:#9bd5ff; margin-top: 4px;">${readyPct}%</div>
+      </div>
+    `));
+    
+    // Total restarts gauge
+    const restarts = metrics['api_restarts_total{service="api"}'] || 0;
+    metricsGrid.appendChild(row(`
+      <div class="gauge-card">
+        <div class="gauge-label">Total Restarts</div>
+        <div class="gauge-value">${restarts}</div>
+        <div class="text-xs" style="color:#9db0c7; margin-top: 6px;">since start</div>
+      </div>
+    `));
+    
+    // INFO events counter
+    const infoEvents = metrics['api_events_total{service="api",level="INFO"}'] || 0;
+    metricsGrid.appendChild(row(`
+      <div class="gauge-card">
+        <div class="gauge-label">Info Events</div>
+        <div class="gauge-value">${infoEvents}</div>
+        <div class="text-xs" style="color:#9db0c7; margin-top: 6px;">lifecycle</div>
+      </div>
+    `));
+    
+    // WARN events counter
+    const warnEvents = metrics['api_events_total{service="api",level="WARN"}'] || 0;
+    metricsGrid.appendChild(row(`
+      <div class="gauge-card">
+        <div class="gauge-label">Warn Events</div>
+        <div class="gauge-value" style="color: #ff9f43;">${warnEvents}</div>
+        <div class="text-xs" style="color:#9db0c7; margin-top: 6px;">anomalies</div>
+      </div>
+    `));
+    
+    console.log('[SUCCESS] Metrics rendered');
+  } catch (e) {
+    console.error('Metrics fetch failed:', e);
+  }
+}
+
+function parseMetrics(text) {
+  const lines = text.split('\n');
+  const metrics = {};
+  
+  for (const line of lines) {
+    if (line.startsWith('#') || !line.trim()) continue;
+    
+    // Parse: api_pods_ready{service="api"} 3
+    const match = line.match(/^([\w_]+(?:\{[^}]+\})?)\s+([\d.]+)$/);
+    if (match) {
+      const [, key, value] = match;
+      metrics[key] = parseFloat(value);
+    }
+  }
+  
+  return metrics;
 }
 
 async function fetchState(){ const r = await fetch('/state'); const s = await r.json(); render(s); }

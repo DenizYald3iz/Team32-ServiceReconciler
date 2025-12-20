@@ -70,6 +70,22 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swagger));
 // State
 app.get('/state', (req,res)=> res.json(readStore()));
 
+// Proxy metrics from controller
+app.get('/metrics', async (req, res) => {
+  try {
+    const resp = await fetch(`${CONTROLLER_URL}/metrics`);
+    if (!resp.ok) {
+      return res.status(resp.status).send(`Controller /metrics error: ${resp.statusText}`);
+    }
+    const text = await resp.text();
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(text);
+  } catch (e) {
+    res.status(500).send(`Metrics fetch error: ${e.message}`);
+  }
+});
+
 // Apply YAML spec (single Service)
 app.post('/apply', requireAuth, (req, res) => {
   const text = typeof req.body === 'string' ? req.body : (req.body.yaml || '');
