@@ -65,3 +65,34 @@
   background: linear-gradient(90deg, #00ffc6, #00ff9d);
   transition: width 0.3s ease;
 }
+
+/* Graphs */
+.chart-card {
+  background: rgba(10, 18, 26, 0.6);
+  border: 1px solid rgba(97, 226, 255, 0.35);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.chart-title {
+  color: #9bd5ff;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.chart-foot {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #7aa8c7;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 170px;
+  display: block;
+  margin-top: 10px;
+  border-radius: 10px;
+  background: rgba(8, 16, 24, 0.85);
+  border: 1px solid rgba(0, 255, 197, 0.18);
+}
