@@ -1,12 +1,25 @@
 import fetch from 'node-fetch';
 import http from 'http';
 import { readStore, writeStore, recordEvent, now } from './store.js';
-import { mailEnabled, sendServiceAlert } from './mailer.js';
+import { mailEnabled, sendServiceAlert, mailConfig } from './mailer.js';
 
 const API_URL = process.env.API_URL || 'http://api:8080';
 const AGENT_URL = process.env.AGENT_URL || 'http://agent:8070';
 const TICK_MS = parseInt(process.env.TICK_MS||'1000',10);
 const X_API_KEY = process.env.X_API_KEY || '';
+
+// Log mail configuration on startup
+const mailCfg = mailConfig();
+console.log('[Controller] Mail configuration:', {
+  enabled: mailEnabled(),
+  host: mailCfg.host || '(not set)',
+  port: mailCfg.port,
+  secure: mailCfg.secure,
+  user: mailCfg.user || '(not set)',
+  hasPass: !!mailCfg.pass,
+  from: mailCfg.from,
+  to: mailCfg.to.length > 0 ? mailCfg.to : '(not set)',
+});
 
 function headers() { return { 'Content-Type':'application/json', ...(X_API_KEY?{'X-API-Key':X_API_KEY}:{}) }; }
 

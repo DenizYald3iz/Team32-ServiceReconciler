@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import swaggerUi from 'swagger-ui-express';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import { readStore, writeStore, recordEvent } from './store.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,20 +36,229 @@ function broadcastState() {
   try {
     const s = readStore();
     const payload = `data: ${JSON.stringify(s)}\n\n`;
-    for (const res of clients) res.write(payload);
-  } catch {}
+    const deadClients = [];
+    for (const res of clients) {
+      try {
+        res.write(payload);
+      } catch (err) {
+        // Client disconnected, mark for removal
+        deadClients.push(res);
+      }
+    }
+    // Remove dead clients
+    deadClients.forEach(res => clients.delete(res));
+  } catch (err) {
+    console.error('[SSE] Error broadcasting state:', err.message);
+  }
 }
 app.get('/events', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no', // Disable buffering in nginx if present
   });
   res.write('retry: 1000\n\n');
   clients.add(res);
-  req.on('close', () => clients.delete(res));
+  
+  // Send initial state
+  try {
+    const s = readStore();
+    res.write(`data: ${JSON.stringify(s)}\n\n`);
+  } catch (err) {
+    console.error('[SSE] Error sending initial state:', err.message);
+  }
+  
+  req.on('close', () => {
+    clients.delete(res);
+  });
+  
+  req.on('error', () => {
+    clients.delete(res);
+  });
 });
-app.post('/_push', (req, res) => { broadcastState(); res.json({ ok: true }); });
+app.post('/_push', (req, res) => { 
+  broadcastState(); 
+  res.json({ ok: true }); 
+});
+
+// --- Round-Robin Load Balancer ---
+// Track current index per service for round-robin
+const roundRobinIndex = new Map(); // service -> current index
+
+function getHealthyPods(serviceName = null) {
+  try {
+    const state = readStore();
+    let pods = Object.values(state.pods || {});
+    
+    // Filter healthy pods
+    pods = pods.filter(p => {
+      if (!p.ready || p.phase !== 'Running') return false;
+      if (p.terminating) return false;
+      if (serviceName && p.service !== serviceName) return false;
+      return true;
+    });
+    
+    // Sort by port for stable ordering
+    pods.sort((a, b) => (a.port || 0) - (b.port || 0));
+    return pods;
+  } catch (err) {
+    console.error('[LB] Error reading state:', err.message);
+    return [];
+  }
+}
+
+function selectNextPod(serviceName) {
+  const healthyPods = getHealthyPods(serviceName);
+  if (healthyPods.length === 0) {
+    // Reset index when no healthy pods
+    roundRobinIndex.delete(serviceName);
+    return null;
+  }
+  
+  const currentIndex = roundRobinIndex.get(serviceName) ?? -1;
+  
+  // Ensure index is within bounds (in case pod list changed)
+  const safeIndex = Math.max(-1, Math.min(currentIndex, healthyPods.length - 1));
+  const nextIndex = (safeIndex + 1) % healthyPods.length;
+  roundRobinIndex.set(serviceName, nextIndex);
+  
+  return healthyPods[nextIndex];
+}
+
+// Load balancer endpoint - demonstrates round-robin selection
+app.get('/lb/select', (req, res) => {
+  const serviceName = req.query.service || 'api';
+  const pod = selectNextPod(serviceName);
+  const allHealthy = getHealthyPods(serviceName);
+  
+  if (!pod) {
+    return res.status(503).json({ 
+      error: 'Service Unavailable', 
+      message: `No healthy pods available for service: ${serviceName}`,
+      healthyPods: []
+    });
+  }
+  
+  res.json({
+    selected: {
+      id: pod.id,
+      port: pod.port,
+      service: pod.service,
+      ready: pod.ready,
+      phase: pod.phase
+    },
+    healthyPods: allHealthy.map(p => ({
+      id: p.id,
+      port: p.port,
+      service: p.service
+    })),
+    totalHealthy: allHealthy.length
+  });
+});
+
+// Load balancer proxy middleware for /proxy/* path
+app.use('/proxy/*', async (req, res, next) => {
+  // Extract service name from query or use default
+  const serviceName = req.query.service || 'api';
+  
+  // Try to find a healthy pod with retry logic
+  let attempts = 0;
+  const maxAttempts = Math.min(3, getHealthyPods(serviceName).length || 1);
+  const triedPods = new Set();
+  
+  while (attempts < maxAttempts) {
+    const pod = selectNextPod(serviceName);
+    
+    if (!pod) {
+      return res.status(503).json({ 
+        error: 'Service Unavailable', 
+        message: `No healthy pods available for service: ${serviceName}` 
+      });
+    }
+    
+    // Skip if we already tried this pod
+    if (triedPods.has(pod.id)) {
+      attempts++;
+      continue;
+    }
+    triedPods.add(pod.id);
+    
+    // In a real system, pods would have HTTP servers on their ports
+    // For this demo, we'll try to proxy to the pod port
+    // Note: In production, pods would be accessible via their ports or through a service mesh
+    const targetUrl = `http://localhost:${pod.port}`;
+    const targetPath = req.path.replace('/proxy', '') || '/';
+    
+    try {
+      // Forward the request to the selected pod
+      const fetchOptions = {
+        method: req.method,
+        headers: { ...req.headers },
+      };
+      
+      // Remove problematic headers
+      delete fetchOptions.headers.host;
+      delete fetchOptions.headers['content-length'];
+      
+      // Add body for non-GET requests
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+        if (typeof req.body === 'string') {
+          fetchOptions.body = req.body;
+        } else {
+          fetchOptions.body = JSON.stringify(req.body);
+          fetchOptions.headers['content-type'] = 'application/json';
+        }
+      }
+      
+      const response = await fetch(targetUrl + targetPath, fetchOptions);
+      
+      // Forward response headers
+      response.headers.forEach((value, key) => {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey !== 'content-encoding' && lowerKey !== 'transfer-encoding' && lowerKey !== 'connection') {
+          res.setHeader(key, value);
+        }
+      });
+      
+      // Forward status
+      res.status(response.status);
+      
+      // Stream response body
+      const body = await response.text();
+      res.send(body);
+      return; // Success, exit
+      
+    } catch (err) {
+      console.error(`[LB] Error proxying to pod ${pod.id} (port ${pod.port}):`, err.message);
+      attempts++;
+      
+      // If this was the last attempt, don't try another pod
+      if (attempts >= maxAttempts) {
+        break;
+      }
+      
+      // Refresh healthy pods list in case it changed
+      const refreshedHealthy = getHealthyPods(serviceName);
+      if (refreshedHealthy.length === 0) {
+        break; // No more healthy pods
+      }
+      
+      // Continue to next pod (round-robin will select next automatically)
+    }
+  }
+  
+  // All attempts failed
+  res.status(503).json({ 
+    error: 'Service Unavailable', 
+    message: `All healthy pods failed for service: ${serviceName}`,
+    triedPods: Array.from(triedPods)
+  });
+});
+
+// Generic load balancer for all non-API routes (optional - can be enabled)
+// This would route all requests except /state, /apply, /chaos, etc. to pods
+// For now, we'll keep it disabled and use /proxy/* explicitly
 
 // Static UI
 app.use(express.static(path.join(__dirname, 'public')));
@@ -62,7 +272,10 @@ const swagger = {
     '/apply': { post: { summary: 'Apply a Service spec (YAML)', responses: { '200': { description: 'OK' } } } },
     '/state': { get: { summary: 'Get cluster state', responses: { '200': { } } } },
     '/chaos/kill': { post: { summary: 'Kill N pods for a service', parameters: [{in:'query',name:'service'},{in:'query',name:'count'}], responses: {'200':{}} } },
-    '/load': { post: { summary: 'Set simulated CPU for a service', parameters: [{in:'query',name:'service'},{in:'query',name:'cpu'}], responses: {'200':{}} } }
+    '/load': { post: { summary: 'Set simulated CPU for a service', parameters: [{in:'query',name:'service'},{in:'query',name:'cpu'}], responses: {'200':{}} } },
+    '/lb/select': { get: { summary: 'Round-robin load balancer: select next healthy pod', parameters: [{in:'query',name:'service'}], responses: {'200':{description:'Selected pod info'},'503':{description:'No healthy pods'}} } },
+    '/proxy/*': { get: { summary: 'Proxy request to healthy pods using round-robin', parameters: [{in:'query',name:'service'}], responses: {'200':{description:'Proxied response'},'503':{description:'Service unavailable'}} } },
+    '/events': { get: { summary: 'SSE stream for real-time state updates', responses: {'200':{description:'Event stream'}} } }
   }
 };
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swagger));
@@ -111,6 +324,7 @@ app.post('/apply', requireAuth, (req, res) => {
   };
   recordEvent(state, 'INFO', name, null, `Applied Desired replicas=${replicas}, digest=${digest}`, 'Desired state updated — Controller will reconcile.');
   writeStore(state);
+  broadcastState(); // Immediate SSE update
   res.json({ ok: true, service: state.services[name] });
 });
 
@@ -127,6 +341,7 @@ app.post('/chaos/kill', requireAuth, async (req, res) => {
     delete state.pods[p.id];
   }
   writeStore(state);
+  broadcastState(); // Immediate SSE update
   res.json({ killed: toKill.map(p=>p.id) });
 });
 
@@ -139,6 +354,7 @@ app.post('/load', requireAuth, (req,res)=>{
   st.services[svc].cpu = cpu;
   recordEvent(st, 'INFO', svc, null, `Load set to ${cpu}%`,'Autoscaler will react if above/below target.');
   writeStore(st);
+  broadcastState(); // Immediate SSE update
   res.json({ ok:true, cpu });
 });
 
@@ -158,6 +374,7 @@ app.post('/scale', requireAuth, (req, res) => {
   svc.replicas = afterCount;
   recordEvent(state, 'INFO', svcName, null, `Manual scale ${delta>0?'+1':'-1'} → ${afterCount}`, 'User-requested change to Desired replicas.');
   writeStore(state);
+  broadcastState(); // Immediate SSE update
   res.json({ ok: true, replicas: afterCount });
 });
 
