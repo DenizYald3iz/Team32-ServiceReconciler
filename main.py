@@ -12,20 +12,24 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import os
+from dotenv import load_dotenv
 
-# --- MONITOR ---
+# .env dosyasındaki değişkenleri yükle
+load_dotenv()
+
+# --- MONITOR KONTROLU ---
 try:
     from monitor import check_service_health
 except ImportError:
     def check_service_health(url):
         import requests
         try:
-            r = requests.get(url, timeout=1.5)
+            r = requests.get(url, timeout=1)
             return (r.status_code == 200), "OK"
         except:
-            return False, "TIMEOUT"
+            return False, "BAĞLANTI YOK"
 
-app = FastAPI(title="Kaos Mühendisliği ve Otonom Sistem v9.0")
+app = FastAPI(title="Güvenli Otonom Sistem vFinal")
 security = HTTPBasic()
 
 # --- GÜVENLİK ---
@@ -34,9 +38,11 @@ ADMIN_PASS = "secure123"
 
 # --- AYARLAR ---
 DB_NAME = "monitor.db"
-SENDER_EMAIL = "ahmetalicallar1@gmail.com"
-SENDER_PASSWORD = "lklh xvtv fcut qtfq"
-RECEIVER_EMAIL = "ahmetalicallar1@gmail.com"
+
+# ŞİFRELER ORTAM DEĞİŞKENİNDEN ALINIYOR
+SENDER_EMAIL = os.getenv("MAIL_USER")
+SENDER_PASSWORD = os.getenv("MAIL_PASS")
+RECEIVER_EMAIL = os.getenv("MAIL_RECEIVER")
 
 VERSIONS = ["v1", "v2", "v3"]
 PORTS = {"v1": 8001, "v2": 8002, "v3": 8003}
@@ -49,7 +55,7 @@ failure_log = []
 last_switch_time = 0
 COOLDOWN = 15
 FAIL_LIMIT = 5
-system_status_msg = "Sistem Stabil"
+system_status_msg = "Sistem Güvenli ve Stabil"
 
 # --- VERİTABANI ---
 def get_db():
@@ -76,13 +82,32 @@ def log_audit(user, action, detail):
         conn.commit(); conn.close()
     except: pass
 
-# --- FAILOVER (SMART FALLBACK) ---
+# --- MAIL ---
+def send_email_notification(subject, text):
+    if not SENDER_EMAIL or not SENDER_PASSWORD:
+        print("Mail gönderilemedi: Kimlik bilgileri eksik.")
+        return
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = RECEIVER_EMAIL
+        msg['Subject'] = f"GÜVENLİK UYARISI: {subject}"
+        msg.attach(MIMEText(text, 'html'))
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
+        server.quit()
+    except Exception as e: 
+        print(f"Mail Hatası: {e}")
+
+# --- AKILLI GEÇİŞ ---
 def execute_smart_failover():
     global current_v_index, last_switch_time, system_status_msg
     
     if time.time() - last_switch_time < COOLDOWN: return
 
-    # V3'ten sonra V1'e dön (Loop)
     target_index = current_v_index + 1
     if target_index >= len(VERSIONS): target_index = 0
     
@@ -90,7 +115,7 @@ def execute_smart_failover():
     new_v = VERSIONS[current_v_index]
     new_port = PORTS[new_v]
     
-    system_status_msg = f"KRİTİK HATA! {new_v.upper()} Geçişi Başlatıldı..."
+    system_status_msg = f"OTONOM GEÇİŞ: {new_v.upper()}..."
     log_audit("SİSTEM (AI)", "FAILOVER", f"{new_v.upper()} sürümüne otomatik geçiş.")
 
     try:
@@ -105,8 +130,10 @@ def execute_smart_failover():
         CONTAINER_MAP["Ana Servis"] = f"my-{new_v}-container"
         last_switch_time = time.time()
         system_status_msg = f"BAŞARILI: {new_v.upper()} Aktif"
+        send_email_notification("OTONOM KURTARMA", f"Sistem {new_v} sürümüne başarıyla taşındı.")
     except Exception as e:
         system_status_msg = f"Hata: {e}"
+        log_audit("SİSTEM (AI)", "HATA", f"Geçiş başarısız: {str(e)}")
 
 # --- MONITOR ---
 def monitor_loop():
@@ -141,7 +168,7 @@ def startup():
     init_db()
     threading.Thread(target=monitor_loop, daemon=True).start()
 
-# --- DASHBOARD (YÜKSEK KONTRAST) ---
+# --- DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
 def get_dashboard(username: str = Depends(get_current_username)):
     conn = get_db()
