@@ -330,7 +330,28 @@ async function reconcileOnce(){
   try { await fetch(`${API_URL}/_push`, { method:'POST' }); } catch {}
 }
 
-setInterval(()=> { reconcileOnce().catch(err=>console.error('reconcile error', err)); }, TICK_MS);
+// IMPORTANT: Avoid overlapping reconcile loops.
+// reconcileOnce() performs multiple async network calls and can take longer
+// than TICK_MS. If we schedule it with setInterval without a lock, multiple
+// reconciles can run concurrently and both observe the same transition,
+// causing duplicate side-effects (like sending the same alert email twice).
+let reconcileInFlight = false;
+
+async function tick() {
+  if (reconcileInFlight) return;
+  reconcileInFlight = true;
+  try {
+    await reconcileOnce();
+  } catch (err) {
+    console.error('reconcile error', err);
+  } finally {
+    reconcileInFlight = false;
+  }
+}
+
+// Run immediately, then periodically.
+tick();
+setInterval(tick, TICK_MS);
 
 // metrics endpoint
 const server = http.createServer((req, res)=>{

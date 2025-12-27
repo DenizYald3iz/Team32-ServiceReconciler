@@ -15,10 +15,13 @@ function parseIntEnv(name, def) {
 }
 
 function listEnv(name) {
-  return String(process.env[name] || '')
+  // Split comma-separated list, trim, drop empties, and de-duplicate.
+  // Duplicate recipients can otherwise look like "the same email was sent twice".
+  const items = String(process.env[name] || '')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean);
+  return [...new Set(items)];
 }
 
 export function mailConfig() {

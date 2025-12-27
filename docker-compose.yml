@@ -22,18 +22,18 @@ services:
       # --- Email alerting (optional) ---
       # Sends an email when a service transitions DOWN (0 ready & desired>0)
       # and when it transitions back UP.
-      # - SMTP_HOST=smtp.gmail.com
-      # - SMTP_PORT=587
-      # - SMTP_SECURE=false
-      # - SMTP_USER=yourmail@gmail.com
-      # - SMTP_PASS=xxxx xxxx xxxx xxxx
-      # - EMAIL_FROM=NeonReconciler <yourmail@gmail.com>
-      # - EMAIL_TO=mailtosend@gmail.com
-      # - EMAIL_SUBJECT_PREFIX=[NeonReconciler]
-      # - ALERT_DOWN_CONFIRM_MS=0
-      # - ALERT_UP_CONFIRM_MS=0
-      # - ALERT_COOLDOWN_MS=0
-      # - ALERT_STARTUP_GRACE_MS=5000
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_SECURE=false
+      - SMTP_USER=deniznizam0@gmail.com
+      - SMTP_PASS=anpv krhj ymgs gmye
+      - EMAIL_FROM=NeonReconciler <deniznizam0@gmail.com>
+      - EMAIL_TO=nizamfurkanegecan@gmail.com
+      - EMAIL_SUBJECT_PREFIX=[NeonReconciler]
+      - ALERT_DOWN_CONFIRM_MS=0
+      - ALERT_UP_CONFIRM_MS=0
+      - ALERT_COOLDOWN_MS=0
+      - ALERT_STARTUP_GRACE_MS=5000
     depends_on: [agent]
     volumes:
       - clusterdata:/data
