@@ -7,7 +7,6 @@ A small **desired-state orchestrator** demo inspired by Kubernetes:
 - A web UI shows services/pods/events live and exposes basic API + metrics.
 
 > Includes an optional **email alerting** feature for service UP/DOWN transitions.  
-> This version also fixes the “same email sent twice” issue (see **Email alerts** + **Troubleshooting**).
 
 ---
 
