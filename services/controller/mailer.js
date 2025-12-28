@@ -66,12 +66,28 @@ function getTransporter() {
   if (transporter && transporterKey === key) return transporter;
 
   transporterKey = key;
-  transporter = nodemailer.createTransport({
+  const transportOptions = {
     host: cfg.host,
     port: cfg.port,
     secure: cfg.secure,
-    ...(cfg.user || cfg.pass ? { auth: { user: cfg.user, pass: cfg.pass } } : {}),
-  });
+  };
+  
+  // For Gmail and other providers using port 587, require TLS
+  if (!cfg.secure && cfg.port === 587) {
+    transportOptions.requireTLS = true;
+    transportOptions.tls = {
+      rejectUnauthorized: false, // Allow self-signed certificates if needed
+    };
+  }
+  
+  if (cfg.user || cfg.pass) {
+    transportOptions.auth = {
+      user: cfg.user,
+      pass: cfg.pass,
+    };
+  }
+  
+  transporter = nodemailer.createTransport(transportOptions);
   return transporter;
 }
 
@@ -89,7 +105,15 @@ async function withTimeout(promise, ms) {
 }
 
 export async function sendServiceAlert({ service, status, desired, ready, digest, whenTs, downtimeMs }) {
-  if (!mailEnabled()) return { ok: false, skipped: true, reason: 'mail not configured' };
+  if (!mailEnabled()) {
+    const cfg = mailConfig();
+    console.error('[Mailer] Mail not enabled:', {
+      hasHost: !!cfg.host,
+      hasTo: cfg.to.length > 0,
+      to: cfg.to,
+    });
+    return { ok: false, skipped: true, reason: 'mail not configured' };
+  }
   const cfg = mailConfig();
   const whenIso = new Date(whenTs || Date.now()).toISOString();
   const subject = `${cfg.subjectPrefix}${service} is ${status}`;
@@ -108,14 +132,27 @@ export async function sendServiceAlert({ service, status, desired, ready, digest
   if (cfg.uiUrl) lines.push(`UI: ${cfg.uiUrl}`);
   const text = lines.join('\n');
 
-  const info = await withTimeout(
-    getTransporter().sendMail({
-      from: cfg.from,
-      to: cfg.to.join(', '),
-      subject,
-      text,
-    }),
-    cfg.timeoutMs
-  );
-  return { ok: true, info };
+  try {
+    console.log('[Mailer] Attempting to send email:', { to: cfg.to, subject });
+    const info = await withTimeout(
+      getTransporter().sendMail({
+        from: cfg.from,
+        to: cfg.to.join(', '),
+        subject,
+        text,
+      }),
+      cfg.timeoutMs
+    );
+    console.log('[Mailer] Email sent successfully:', { messageId: info.messageId });
+    return { ok: true, info };
+  } catch (error) {
+    console.error('[Mailer] Failed to send email:', {
+      error: error.message,
+      code: error.code,
+      command: error.command,
+      response: error.response,
+      responseCode: error.responseCode,
+    });
+    throw error;
+  }
 }

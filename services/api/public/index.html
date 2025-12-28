@@ -3,7 +3,38 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style> h1, h2, h3, .neon-chip { font-family:"Orbitron", ui-sans-serif, system-ui; } </style>
+  <style> 
+    h1, h2, h3, .neon-chip { font-family:"Orbitron", ui-sans-serif, system-ui; }
+    
+    .tab-btn {
+      padding: 0.75rem 1.5rem;
+      border: 1px solid rgba(155,213,255,0.3);
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      border-radius: 4px;
+    }
+    
+    .tab-btn:hover {
+      background: rgba(155,213,255,0.1);
+      border-color: rgba(155,213,255,0.5);
+    }
+    
+    .tab-btn.active {
+      background: rgba(155,213,255,0.1);
+      border-color: #9bd5ff;
+      box-shadow: 0 0 10px rgba(155,213,255,0.3);
+    }
+    
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 5px rgba(0,255,198,0.3); }
+      50% { box-shadow: 0 0 15px rgba(0,255,198,0.6); }
+    }
+    
+    .selected-pod {
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+  </style>
   <title>Perfect System · Tron UI</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="./css/tron.css" />
@@ -35,6 +66,16 @@
   </header>
 
   <main class="max-w-7xl mx-auto px-6 pb-10 space-y-6">
+    <!-- Tab Navigation -->
+    <section class="neon-border p-1">
+      <div class="flex gap-2">
+        <button id="tabMain" class="tab-btn active" style="color:#9bd5ff; background:rgba(155,213,255,0.1);">Main Dashboard</button>
+        <button id="tabLoadBalancer" class="tab-btn" style="color:#9bd5ff;">Load Balancer</button>
+      </div>
+    </section>
+
+    <!-- Main Dashboard Content -->
+    <div id="mainDashboardContent">
     <!-- Actions -->
     <section class="grid md:grid-cols-3 gap-4">
       <div class="neon-border p-4">
@@ -146,6 +187,66 @@
       </div>
       <div id="events" class="mt-2 max-h-72 overflow-auto"></div>
     </section>
+    </div>
+
+    <!-- Load Balancer Dashboard Content -->
+    <div id="loadBalancerContent" class="hidden">
+      <!-- Controls -->
+      <section class="neon-border p-4">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl" style="color:#9bd5ff">Load Balancer Controls</h2>
+          <div class="flex gap-2">
+            <select id="lbService" class="bg-[#0b1a24] text-[#cfe9ff] p-2 rounded">
+              <option>api</option>
+            </select>
+            <button id="lbTestRequest" class="neon-btn" style="color:#00ffc6">Test Request</button>
+            <button id="lbAutoTest" class="neon-btn" style="color:#9bd5ff">Auto Test (10x)</button>
+            <button id="lbClearHistory" class="neon-btn" style="color:#ff9f43">Clear History</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Statistics Panel -->
+      <section class="neon-border p-4">
+        <h2 class="text-xl mb-3" style="color:#9bd5ff">Load Balance Statistics</h2>
+        <div id="lbStats" class="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <!-- Populated by JavaScript -->
+        </div>
+      </section>
+
+      <!-- Round-Robin Visualization -->
+      <section class="neon-border p-4">
+        <h2 class="text-xl mb-3" style="color:#9bd5ff">Round-Robin Sequence</h2>
+        <div id="roundRobinViz" class="flex items-center justify-center gap-4 p-6" style="min-height:200px;">
+          <!-- Populated by JavaScript -->
+        </div>
+      </section>
+
+      <!-- Pod Status Grid -->
+      <section class="neon-border p-4">
+        <h2 class="text-xl mb-3" style="color:#9bd5ff">Pod Status Grid</h2>
+        <div id="podStatusGrid" class="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <!-- Populated by JavaScript -->
+        </div>
+      </section>
+
+      <!-- Request Distribution Chart -->
+      <section class="neon-border p-4">
+        <h2 class="text-xl mb-3" style="color:#9bd5ff">Request Distribution</h2>
+        <canvas id="requestDistributionChart" class="w-full" style="height:300px; background:rgba(8,16,24,0.5);"></canvas>
+      </section>
+
+      <!-- Request Timeline -->
+      <section class="neon-border p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-xl" style="color:#9bd5ff">Request Timeline</h2>
+          <span id="timelineCount" class="text-sm" style="color:#7aa8c7">0 requests</span>
+        </div>
+        <div id="requestTimeline" class="space-y-2 max-h-96 overflow-auto">
+          <!-- Populated by JavaScript -->
+        </div>
+      </section>
+    </div>
   </main>
 
   <!-- Help modal -->
@@ -172,6 +273,24 @@ const connDot = $('connDot'); const connText = $('connText');
 const yamlInput = $('yamlInput'); const servicesDiv=$('services'); const podsDiv=$('pods'); const eventsDiv=$('events');
 const autoRefresh = $('autoRefresh'); const tourBtn=$('tourBtn'); const helpModal=$('helpModal');
 const explainToggle=$('explainToggle'); const cpuRange=$('cpuRange'); const cpuVal=$('cpuVal');
+
+// Tab navigation
+const tabMain = $('tabMain');
+const tabLoadBalancer = $('tabLoadBalancer');
+const mainDashboardContent = $('mainDashboardContent');
+const loadBalancerContent = $('loadBalancerContent');
+
+// Load Balancer elements
+const lbService = $('lbService');
+const lbTestRequest = $('lbTestRequest');
+const lbAutoTest = $('lbAutoTest');
+const lbClearHistory = $('lbClearHistory');
+const lbStats = $('lbStats');
+const roundRobinViz = $('roundRobinViz');
+const podStatusGrid = $('podStatusGrid');
+const requestDistributionChart = $('requestDistributionChart');
+const requestTimeline = $('requestTimeline');
+const timelineCount = $('timelineCount');
 
 const graphServiceSel = $('graphService');
 const clearGraphsBtn = $('clearGraphs');
@@ -517,10 +636,20 @@ function render(state){
   podsDiv.innerHTML='';
   const pods = Object.values(state.pods).sort((a,b)=>a.start_ts-b.start_ts);
   for (const p of pods){
-    const clr = p.ready ? '#00ff9d' : '#ff5c7a';
-    podsDiv.appendChild(row(`<div class="p-3 rounded border border-[#1b3a48]">
+    // Determine pod health status
+    const isHealthy = p.ready && p.phase === 'Running' && !p.terminating;
+    const bgColor = isHealthy ? 'rgba(0, 255, 157, 0.1)' : 'rgba(255, 92, 122, 0.15)';
+    const borderColor = isHealthy ? '#00ff9d' : '#ff5c7a';
+    const statusText = isHealthy ? 'Ready' : (p.terminating ? 'Terminating' : (p.phase !== 'Running' ? 'Not Running' : 'Not Ready'));
+    const statusColor = isHealthy ? '#00ff9d' : '#ff5c7a';
+    const statusDot = isHealthy ? '●' : '○';
+    
+    podsDiv.appendChild(row(`<div class="p-3 rounded border-2 transition-all duration-300" style="background:${bgColor}; border-color:${borderColor};">
       <div class="flex items-center justify-between">
-        <div class="text-[#cfe9ff]"><b>${p.service}</b> · <span style="color:${clr}">${p.ready?'Ready':'NotReady'}</span></div>
+        <div class="flex items-center gap-2">
+          <span style="color:${statusColor}; font-size: 12px;">${statusDot}</span>
+          <div class="text-[#cfe9ff]"><b>${p.service}</b> · <span style="color:${statusColor}">${statusText}</span></div>
+        </div>
         <div class="text-xs" style="color:#9bd5ff">digest ${p.image_digest} · ${p.id.slice(0,6)}</div>
       </div>
       <div class="text-xs mt-1" style="color:#7aa8c7">port ${p.port} · restarts ${p.restarts||0}</div>
@@ -546,6 +675,14 @@ function render(state){
   updateGraphServiceOptions(state);
   updateGraphHistory(state);
   renderGraphs();
+  
+  // Update load balancer service options
+  updateLbServiceOptions(state);
+  
+  // Update load balancer dashboard if visible
+  if (!loadBalancerContent.classList.contains('hidden')) {
+    updateLoadBalancerDashboard();
+  }
 }
 
 async function renderMetrics() {
@@ -639,16 +776,91 @@ clearGraphsBtn.addEventListener('click', ()=>{
   anomSeenQueue.length = 0;
   renderGraphs();
 });
-window.addEventListener('resize', ()=> renderGraphs());
+window.addEventListener('resize', ()=> {
+  renderGraphs();
+  if (!loadBalancerContent.classList.contains('hidden')) {
+    updateRequestDistribution();
+  }
+});
 
 async function fetchState(){ const r = await fetch('/state'); const s = await r.json(); render(s); }
 
-// SSE live updates (best effort)
-try {
-  const es = new EventSource('/events');
-  es.onmessage = (ev)=> { const s = JSON.parse(ev.data); render(s); };
-  es.onerror = ()=> { connDot.style.color='#7a8fa6'; connText.textContent='Disconnected'; };
-} catch{}
+// SSE live updates with reconnection
+let eventSource = null;
+let reconnectTimeout = null;
+
+function connectSSE() {
+  try {
+    if (eventSource) {
+      eventSource.close();
+    }
+    
+    eventSource = new EventSource('/events');
+    
+    eventSource.onopen = () => {
+      connDot.style.color = '#00ff9d';
+      connText.textContent = 'Live';
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+      }
+    };
+    
+    eventSource.onmessage = (ev) => {
+      try {
+        const s = JSON.parse(ev.data);
+        render(s);
+        
+        // Update load balancer dashboard if visible
+        if (!loadBalancerContent.classList.contains('hidden')) {
+          updatePodStatusGrid();
+          updateStatsPanel();
+        }
+      } catch (err) {
+        console.error('[SSE] Error parsing state:', err);
+      }
+    };
+    
+    eventSource.onerror = (err) => {
+      connDot.style.color = '#ff5c7a';
+      connText.textContent = 'Disconnected';
+      
+      if (eventSource.readyState === EventSource.CLOSED) {
+        // Reconnect after delay
+        if (!reconnectTimeout) {
+          reconnectTimeout = setTimeout(() => {
+            console.log('[SSE] Reconnecting...');
+            connectSSE();
+          }, 2000);
+        }
+      }
+    };
+  } catch (err) {
+    console.error('[SSE] Connection error:', err);
+    connDot.style.color = '#ff5c7a';
+    connText.textContent = 'Error';
+    
+    // Retry connection
+    if (!reconnectTimeout) {
+      reconnectTimeout = setTimeout(() => {
+        connectSSE();
+      }, 3000);
+    }
+  }
+}
+
+// Initial connection
+connectSSE();
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  if (eventSource) {
+    eventSource.close();
+  }
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+  }
+});
 
 async function applyYaml(y){ await fetch('/apply', { method:'POST', headers:{'Content-Type':'application/yaml'}, body:y }); playClick(); }
 async function kill(service, count){ await fetch('/chaos/kill?service='+encodeURIComponent(service)+'&count='+count, { method:'POST' }); playClick(); }
@@ -688,6 +900,341 @@ async function playSequence(){
   await kill('api', 1);
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// Tab Navigation
+function switchTab(tabName) {
+  if (tabName === 'main') {
+    tabMain.classList.add('active');
+    tabMain.style.background = 'rgba(155,213,255,0.1)';
+    tabLoadBalancer.classList.remove('active');
+    tabLoadBalancer.style.background = 'transparent';
+    mainDashboardContent.classList.remove('hidden');
+    loadBalancerContent.classList.add('hidden');
+  } else if (tabName === 'loadbalancer') {
+    tabLoadBalancer.classList.add('active');
+    tabLoadBalancer.style.background = 'rgba(155,213,255,0.1)';
+    tabMain.classList.remove('active');
+    tabMain.style.background = 'transparent';
+    mainDashboardContent.classList.add('hidden');
+    loadBalancerContent.classList.remove('hidden');
+    updateLoadBalancerDashboard();
+  }
+}
+
+tabMain.addEventListener('click', () => switchTab('main'));
+tabLoadBalancer.addEventListener('click', () => switchTab('loadbalancer'));
+
+// Load Balancer Data Structures
+const requestHistory = [];
+const podStats = {}; // podId -> { requestCount, lastRequest, port, service }
+
+// Load Balancer Functions
+function updateLbServiceOptions(state) {
+  const names = Object.keys(state.services || {});
+  if (names.length === 0) return;
+  
+  const current = lbService.value;
+  lbService.innerHTML = '';
+  for (const name of names) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === current || (!current && name === 'api')) opt.selected = true;
+    lbService.appendChild(opt);
+  }
+}
+
+async function testLoadBalancerRequest() {
+  const service = lbService.value;
+  try {
+    const resp = await fetch(`/lb/select?service=${encodeURIComponent(service)}`);
+    const data = await resp.json();
+    
+    if (resp.ok && data.selected) {
+      const selected = data.selected;
+      const timestamp = Date.now();
+      
+      // Add to history
+      requestHistory.unshift({
+        timestamp,
+        podId: selected.id,
+        podPort: selected.port,
+        service: service,
+        success: true
+      });
+      
+      // Limit history size
+      if (requestHistory.length > 100) requestHistory.pop();
+      
+      // Update pod stats
+      if (!podStats[selected.id]) {
+        podStats[selected.id] = { requestCount: 0, lastRequest: 0, port: selected.port, service: service };
+      }
+      podStats[selected.id].requestCount++;
+      podStats[selected.id].lastRequest = timestamp;
+      
+      // Update all visualizations
+      updateRequestTimeline();
+      setTimeout(() => updateRequestDistribution(), 10); // Small delay for canvas
+      updateRoundRobinViz(data);
+      updatePodStatusGrid();
+      updateStatsPanel();
+      
+      return data;
+    } else {
+      console.error('Load balancer request failed:', data);
+      return null;
+    }
+  } catch (err) {
+    console.error('Load balancer error:', err);
+    return null;
+  }
+}
+
+async function autoTestLoadBalancer() {
+  lbAutoTest.disabled = true;
+  lbAutoTest.textContent = 'Running...';
+  
+  for (let i = 0; i < 10; i++) {
+    await testLoadBalancerRequest();
+    await new Promise(r => setTimeout(r, 500));
+  }
+  
+  lbAutoTest.disabled = false;
+  lbAutoTest.textContent = 'Auto Test (10x)';
+}
+
+function clearLoadBalancerHistory() {
+  requestHistory.length = 0;
+  Object.keys(podStats).forEach(key => {
+    podStats[key].requestCount = 0;
+  });
+  updateRequestTimeline();
+  updateRequestDistribution();
+  updateStatsPanel();
+  updatePodStatusGrid();
+}
+
+// Update Functions
+function updateRequestTimeline() {
+  timelineCount.textContent = `${requestHistory.length} requests`;
+  
+  if (requestHistory.length === 0) {
+    requestTimeline.innerHTML = '<div class="text-sm text-center p-4" style="color:#7aa8c7">No requests yet. Click "Test Request" to start.</div>';
+    return;
+  }
+  
+  requestTimeline.innerHTML = requestHistory.slice(0, 50).map(req => {
+    const time = new Date(req.timestamp).toLocaleTimeString();
+    return `
+      <div class="p-2 rounded border border-[#1b3a48] flex items-center justify-between" style="background:rgba(11,26,36,0.3);">
+        <div class="flex items-center gap-3">
+          <span class="text-xs" style="color:#7aa8c7">${time}</span>
+          <span class="text-sm font-mono" style="color:#00ffc6">${req.podId}</span>
+          <span class="text-xs" style="color:#9bd5ff">port ${req.podPort}</span>
+        </div>
+        <span class="text-xs" style="color:#00ff9d">✓</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateRequestDistribution() {
+  const ctx = requestDistributionChart.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = requestDistributionChart.getBoundingClientRect();
+  const w = Math.max(10, Math.floor(rect.width));
+  const h = Math.max(10, Math.floor(rect.height));
+  
+  if (requestDistributionChart.width !== w * dpr || requestDistributionChart.height !== h * dpr) {
+    requestDistributionChart.width = w * dpr;
+    requestDistributionChart.height = h * dpr;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  
+  ctx.clearRect(0, 0, w, h);
+  
+  // Get pod stats
+  const pods = Object.entries(podStats).filter(([_, stats]) => stats.requestCount > 0);
+  if (pods.length === 0) {
+    ctx.fillStyle = '#7aa8c7';
+    ctx.font = '16px Orbitron, ui-sans-serif, system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('No requests yet', w / 2, h / 2);
+    return;
+  }
+  
+  const maxCount = Math.max(...pods.map(([_, stats]) => stats.requestCount));
+  const barWidth = (w - 40) / pods.length;
+  const barMaxHeight = h - 60;
+  
+  // Draw bars
+  pods.forEach(([podId, stats], idx) => {
+    const barHeight = (stats.requestCount / maxCount) * barMaxHeight;
+    const x = 20 + idx * barWidth + barWidth / 2;
+    const y = h - 40;
+    
+    // Bar
+    ctx.fillStyle = '#00ffc6';
+    ctx.fillRect(x - barWidth / 2 + 4, y - barHeight, barWidth - 8, barHeight);
+    
+    // Value
+    ctx.fillStyle = '#cfe9ff';
+    ctx.font = '12px Orbitron, ui-sans-serif, system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(stats.requestCount.toString(), x, y - barHeight - 5);
+    
+    // Pod ID (truncated)
+    ctx.fillStyle = '#9bd5ff';
+    ctx.font = '10px ui-sans-serif, system-ui';
+    ctx.fillText(podId.slice(0, 8), x, y + 15);
+    ctx.fillText(`port ${stats.port}`, x, y + 28);
+  });
+  
+  // Y-axis label
+  ctx.fillStyle = '#9db0c7';
+  ctx.font = '12px Orbitron, ui-sans-serif, system-ui';
+  ctx.textAlign = 'left';
+  ctx.fillText('Requests', 10, 20);
+}
+
+function updateRoundRobinViz(lbData) {
+  if (!lbData || !lbData.healthyPods || lbData.healthyPods.length === 0) {
+    roundRobinViz.innerHTML = '<div class="text-sm text-center" style="color:#7aa8c7">No healthy pods available</div>';
+    return;
+  }
+  
+  const selectedPodId = lbData.selected?.id;
+  const pods = lbData.healthyPods;
+  const currentIndex = pods.findIndex(p => p.id === selectedPodId);
+  const nextIndex = (currentIndex + 1) % pods.length;
+  
+  roundRobinViz.innerHTML = pods.map((pod, idx) => {
+    const isSelected = pod.id === selectedPodId;
+    const isNext = idx === nextIndex;
+    const borderColor = isSelected ? '#00ffc6' : (isNext ? '#9bd5ff' : '#1b3a48');
+    const bgColor = isSelected ? 'rgba(0,255,198,0.15)' : (isNext ? 'rgba(155,213,255,0.1)' : 'rgba(11,26,36,0.3)');
+    const borderWidth = isSelected ? '3px' : '1px';
+    const selectedClass = isSelected ? 'selected-pod' : '';
+    
+    return `
+      <div class="relative flex flex-col items-center p-4 rounded border-2 transition-all duration-300 ${selectedClass}" 
+           style="border-color:${borderColor}; border-width:${borderWidth}; background:${bgColor}; min-width:120px;">
+        ${isSelected ? '<div class="absolute -top-2 left-1/2 transform -translate-x-1/2 text-lg animate-pulse" style="color:#00ffc6;">▼</div>' : ''}
+        ${isNext && !isSelected ? '<div class="absolute -top-2 left-1/2 transform -translate-x-1/2 text-xs" style="color:#9bd5ff;">→ Next</div>' : ''}
+        <div class="text-sm font-mono mb-1 font-bold" style="color:${isSelected ? '#00ffc6' : '#cfe9ff'}">${pod.id.slice(0, 8)}</div>
+        <div class="text-xs" style="color:#9bd5ff">Port ${pod.port}</div>
+        <div class="text-xs mt-1" style="color:#7aa8c7">${podStats[pod.id]?.requestCount || 0} req</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updatePodStatusGrid() {
+  // Get current state
+  fetch('/state').then(r => r.json()).then(state => {
+    const service = lbService.value;
+    const pods = Object.values(state.pods || {}).filter(p => !service || p.service === service);
+    
+    if (pods.length === 0) {
+      podStatusGrid.innerHTML = '<div class="text-sm text-center p-4" style="color:#7aa8c7">No pods found</div>';
+      return;
+    }
+    
+    podStatusGrid.innerHTML = pods.map(pod => {
+      const isHealthy = pod.ready && pod.phase === 'Running' && !pod.terminating;
+      const stats = podStats[pod.id] || { requestCount: 0, lastRequest: 0 };
+      const bgColor = isHealthy ? 'rgba(0,255,157,0.1)' : 'rgba(255,92,122,0.15)';
+      const borderColor = isHealthy ? '#00ff9d' : '#ff5c7a';
+      const statusText = isHealthy ? 'Healthy' : (pod.terminating ? 'Terminating' : 'Unhealthy');
+      
+      return `
+        <div class="p-3 rounded border-2 transition-all" style="background:${bgColor}; border-color:${borderColor};">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-sm font-mono" style="color:#cfe9ff">${pod.id.slice(0, 10)}</div>
+            <div class="text-xs px-2 py-1 rounded" style="background:${borderColor}; color:#031b1a">${statusText}</div>
+          </div>
+          <div class="text-xs mb-1" style="color:#9bd5ff">Port: ${pod.port}</div>
+          <div class="text-xs mb-1" style="color:#9bd5ff">Service: ${pod.service}</div>
+          <div class="text-xs mt-2 pt-2 border-t border-[#1b3a48]">
+            <div style="color:#7aa8c7">Requests: <span style="color:#00ffc6">${stats.requestCount}</span></div>
+            ${stats.lastRequest ? `<div style="color:#7aa8c7">Last: ${new Date(stats.lastRequest).toLocaleTimeString()}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }).catch(err => {
+    console.error('Error updating pod status grid:', err);
+  });
+}
+
+function updateStatsPanel() {
+  const totalRequests = requestHistory.length;
+  const pods = Object.entries(podStats).filter(([_, stats]) => stats.requestCount > 0);
+  const avgRequests = pods.length > 0 ? (totalRequests / pods.length).toFixed(1) : 0;
+  
+  const requestCounts = pods.map(([_, stats]) => stats.requestCount);
+  const maxRequests = requestCounts.length > 0 ? Math.max(...requestCounts) : 0;
+  const minRequests = requestCounts.length > 0 ? Math.min(...requestCounts) : 0;
+  
+  // Calculate variance for distribution equality
+  const variance = requestCounts.length > 0 
+    ? requestCounts.reduce((sum, count) => sum + Math.pow(count - avgRequests, 2), 0) / requestCounts.length 
+    : 0;
+  const stdDev = Math.sqrt(variance).toFixed(1);
+  
+  // Get healthy pod count
+  fetch('/state').then(r => r.json()).then(state => {
+    const service = lbService.value;
+    const allPods = Object.values(state.pods || {}).filter(p => !service || p.service === service);
+    const healthyPods = allPods.filter(p => p.ready && p.phase === 'Running' && !p.terminating);
+    
+    lbStats.innerHTML = `
+      <div class="p-3 rounded border border-[#1b3a48]" style="background:rgba(11,26,36,0.5);">
+        <div class="text-xs mb-1" style="color:#7aa8c7">Total Requests</div>
+        <div class="text-2xl font-bold" style="color:#00ffc6">${totalRequests}</div>
+      </div>
+      <div class="p-3 rounded border border-[#1b3a48]" style="background:rgba(11,26,36,0.5);">
+        <div class="text-xs mb-1" style="color:#7aa8c7">Avg per Pod</div>
+        <div class="text-2xl font-bold" style="color:#9bd5ff">${avgRequests}</div>
+      </div>
+      <div class="p-3 rounded border border-[#1b3a48]" style="background:rgba(11,26,36,0.5);">
+        <div class="text-xs mb-1" style="color:#7aa8c7">Distribution (σ)</div>
+        <div class="text-2xl font-bold" style="color:#ff9f43">${stdDev}</div>
+        <div class="text-xs mt-1" style="color:#7aa8c7">Lower is better</div>
+      </div>
+      <div class="p-3 rounded border border-[#1b3a48]" style="background:rgba(11,26,36,0.5);">
+        <div class="text-xs mb-1" style="color:#7aa8c7">Healthy Pods</div>
+        <div class="text-2xl font-bold" style="color:#00ff9d">${healthyPods.length}</div>
+        <div class="text-xs mt-1" style="color:#7aa8c7">of ${allPods.length} total</div>
+      </div>
+    `;
+  }).catch(err => {
+    console.error('Error updating stats panel:', err);
+  });
+}
+
+function updateLoadBalancerDashboard() {
+  updateRequestTimeline();
+  updateRequestDistribution();
+  updatePodStatusGrid();
+  updateStatsPanel();
+  
+  // Get current LB state
+  const service = lbService.value;
+  fetch(`/lb/select?service=${encodeURIComponent(service)}`).then(r => r.json()).then(data => {
+    if (data.selected) {
+      updateRoundRobinViz(data);
+    }
+  }).catch(err => {
+    console.error('Error updating load balancer dashboard:', err);
+  });
+}
+
+// Event listeners
+lbTestRequest.addEventListener('click', testLoadBalancerRequest);
+lbAutoTest.addEventListener('click', autoTestLoadBalancer);
+lbClearHistory.addEventListener('click', clearLoadBalancerHistory);
 
 // polling
 let timer = null;
