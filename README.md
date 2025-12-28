@@ -1,80 +1,145 @@
-# Team32 Service Reconciler (Perfect System · Tron UI)
+# Team32 Service Reconciler — *Perfect System* (Tron UI) + Secure Failover Monitor
 
-A small **desired-state orchestrator** demo inspired by Kubernetes:
+A **teaching / demo project** that shows two related ideas:
 
-- You declare **Desired** state (via YAML).
-- A **Controller** continuously reconciles **Actual** state until they match.
-- A web UI shows services/pods/events live and exposes basic API + metrics.
+1) **Desired-state orchestration** (Kubernetes-style reconciliation) — you declare what you want (*replicas, rollout strategy, probes, autoscaling*), and a Controller reconciles until the simulated cluster matches.
+2) A **secure monitoring dashboard** (FastAPI) that logs health checks + audit actions, supports “chaos” toggles, and can automatically fail over between **v1 → v2 → v3** demo services.
 
-> Includes an optional **email alerting** feature for service UP/DOWN transitions.  
-
----
-
-## Architecture (3 services)
-
-- **API** (`services/api`)  
-  Serves the UI, accepts YAML specs, exposes `/state`, and pushes state updates via SSE.
-- **Controller** (`services/controller`)  
-  Reconcile loop: spawn/kill pods, perform rollouts, run probes, autoscale, emit events, send alerts.
-- **Agent** (`services/agent`)  
-  Simulates “pods” (not real containers): assigns ports, responds to probes, supports kill/drain.
-
-State is stored in a shared JSON file (mounted volume) so API + Controller see the same cluster state.
+> This is a **simulation**: no real Kubernetes cluster is required. It’s built to be easy to run locally and easy to explain in a classroom demo.
 
 ---
 
-## Quick start (Docker)
+## Contents
 
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick start: Perfect System (Docker)](#quick-start-perfect-system-docker)
+- [Using the Perfect System API](#using-the-perfect-system-api)
+- [Secure Failover Monitor (FastAPI demo)](#secure-failover-monitor-fastapi-demo)
+- [Security notes](#security-notes)
+- [Tests (pytest)](#tests-pytest)
+- [Project structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
+## Features
+
+### Perfect System (Node/Express + Docker Compose)
+- **Tron UI** dashboard (live updates via Server-Sent Events).
+- **Apply a Service spec** in YAML (`POST /apply`) and watch reconciliation.
+- **Pods + replicas**: Controller creates/terminates simulated pods to match desired replicas.
+- **Readiness & liveness probes** (simulated checks).
+- **Autoscaling** based on simulated CPU (`POST /load`).
+- **Rollouts**:
+  - Blue/Green
+  - Canary (step-based)
+- **Chaos testing**: kill N pods (`POST /chaos/kill`).
+- **Round-robin load balancer**: pick next healthy pod (`GET /lb/select`) and proxy (`/proxy/*`).
+- **Prometheus-style metrics** exposed by Controller and proxied by API (`GET /metrics`).
+- Optional **email alerts** when a service transitions **DOWN** and later **UP** (Controller env vars).
+
+### Secure Failover Monitor (Python/FastAPI)
+- Password-protected **HTML dashboard** (HTTP Basic Auth).
+- **Audit logging** (who clicked what) + **health logs** stored in SQLite (`monitor.db` by default).
+- **Chaos toggles** that make the demo service slow / corrupted (CPU load + data corruption).
+- **Smart failover** logic that switches between **v1/v2/v3** if the active one fails (cooldown + failure threshold).
+- Optional email notification via `.env` (Gmail SMTP).
+
+---
+
+## Architecture
+
+### Perfect System (Docker)
+```
+┌───────────┐     desired state (YAML)      ┌───────────────┐
+│  Tron UI  │  ──────────────────────────▶  │      API      │  (Express)
+│  (web)    │   SSE: /events, state: /state │  :8080        │
+└───────────┘                                └──────┬────────┘
+                                                    │
+                                                    │ state.json (volume)
+                                                    ▼
+                                             ┌───────────────┐
+                                             │   Controller  │  reconcile loop
+                                             │    :8090      │  + /metrics
+                                             └──────┬────────┘
+                                                    │
+                                                    ▼
+                                             ┌───────────────┐
+                                             │     Agent     │  simulates pods
+                                             │     :8070     │
+                                             └───────────────┘
+```
+
+### Secure Failover Monitor (FastAPI)
+- `services/v1`, `services/v2`, `services/v3` are small FastAPI demo apps.
+- `main.py` is the monitoring dashboard that checks `/health` of the active version and can switch to the next one.
+
+---
+
+## Quick start: Perfect System (Docker)
+
+### Requirements
+- Docker + Docker Compose
+
+### Run
 ```bash
+cd Team32-ServiceReconciler
 docker compose up --build
 ```
 
 Open:
-- UI: http://localhost:8080
-- API docs (Swagger): http://localhost:8080/docs
-- Metrics (Prometheus text): http://localhost:8080/metrics
+- **Tron UI:** http://localhost:8080  
+- **Swagger API docs:** http://localhost:8080/docs  
+- **Cluster state (JSON):** http://localhost:8080/state  
+- **Prometheus metrics:** http://localhost:8080/metrics  
+
+Stop:
+```bash
+docker compose down
+```
 
 ---
 
-## Using the system
+## Using the Perfect System API
 
-### Apply a service spec (YAML)
+### Apply a service YAML
+The API accepts a single `kind: Service` YAML document.
 
+Example (also available in `examples/`):
 ```bash
-curl -sS -H 'Content-Type: application/yaml'   --data-binary @examples/api-v1.yaml   http://localhost:8080/apply
+curl -X POST http://localhost:8080/apply   -H "Content-Type: application/yaml"   --data-binary @examples/api-v1.yaml
 ```
 
-Other examples:
-- `examples/api-v1.yaml` — baseline
-- `examples/api-v2.yaml` — blue/green style rollout
-- `examples/api-canary.yaml` — canary rollout in steps
-
-### Chaos (kill pods)
-
+### Chaos: kill pods
 ```bash
-curl -X POST "http://localhost:8080/chaos/kill?service=api&count=1"
+curl -X POST "http://localhost:8080/chaos/kill?service=api&count=2"
 ```
 
-### Simulated load (for autoscaling demos)
-
+### Simulated load (autoscaling demo)
 ```bash
 curl -X POST "http://localhost:8080/load?service=api&cpu=80"
 ```
 
-### Manual scale
-
+### Manual scaling (+1 / -1)
 ```bash
 curl -X POST "http://localhost:8080/scale?service=api&delta=1"
 curl -X POST "http://localhost:8080/scale?service=api&delta=-1"
 ```
 
+### Load balancer selection
+```bash
+curl "http://localhost:8080/lb/select?service=api"
+```
+
 ---
 
-## Service YAML format (what `/apply` expects)
+## Service YAML format
 
-Minimum shape:
-
+Minimum:
 ```yaml
+apiVersion: v1
 kind: Service
 metadata:
   name: api
@@ -83,115 +148,148 @@ spec:
   image: local://demo@v1
 ```
 
-Supported `spec` fields (as used by the Controller/Agent simulation):
-- `replicas` (number)
-- `image` (string)  
-  The controller uses the “digest” portion to detect version drift (e.g. `...@v2`).
-- `env` (list of `{name, value}`)  
-  The Agent reads env values like `HEALTHY` to simulate probe results.
-- `rollout` (object)  
-  - `strategy: BlueGreen | Canary`
-  - for canary: `steps: [{percent: 25}, {percent: 50}, ...]` and `pauseSeconds`
-- `readinessProbe` / `livenessProbe` (objects)  
-  Supports `initialDelaySeconds`, `failureThreshold`, etc. (simulation).
-- `autoscale` (object)  
-  Supports `targetCPU`, `min`, `max` (simple HPA-like logic).
+Supported fields (high level):
+- `spec.replicas` (int)
+- `spec.image` (`local://demo@v1`, `local://demo@v2`, …)
+- `spec.env` (list of `{name,value}`)
+- `spec.readinessProbe.httpGet.path`
+- `spec.livenessProbe.httpGet.path`
+- `spec.autoscale` (targetCPU, min/max, etc. — used by the Controller simulation)
+- `spec.rollout.strategy`: `BlueGreen` or `Canary`
+- `spec.rollout.steps` (for Canary)
+
+See the ready-to-run examples:
+- `examples/api-v1.yaml`
+- `examples/api-v2.yaml`
+- `examples/api-canary.yaml`
 
 ---
 
-## API endpoints (high level)
+## Secure Failover Monitor (FastAPI demo)
 
-- `GET /` — UI
-- `GET /docs` — Swagger UI
-- `GET /state` — current cluster state
-- `GET /events` — Server-Sent Events stream of state updates
-- `GET /metrics` — Prometheus-style metrics (proxied from controller)
-- `POST /apply` — apply a Service YAML
-- `POST /chaos/kill?service=...&count=...` — kill running pods
-- `POST /load?service=...&cpu=0..100` — set simulated CPU
-- `POST /scale?service=...&delta=+1|-1` — adjust desired replicas
+This is a **separate local demo** (no Docker required) that focuses on monitoring + audit logging + failover.
+
+### Requirements
+- Python 3.10+ recommended
+
+### Install
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+```
+
+### Run the three demo services
+In three terminals:
+```bash
+uvicorn services.v1.app:app --port 8001
+uvicorn services.v2.app:app --port 8002
+uvicorn services.v3.app:app --port 8003
+```
+
+### Run the dashboard
+```bash
+uvicorn main:app --port 8000
+```
+
+Open:
+- Dashboard: http://localhost:8000  
+  - **Username:** `admin`
+  - **Password:** `secure123`
+
+> The dashboard writes logs to `monitor.db` by default. Tests override this path to use a temporary DB.
+
+### Optional email notifications
+Copy `.env.example` to `.env` and fill the variables:
+```bash
+cp .env.example .env
+# edit .env
+```
 
 ---
 
-## Security (optional API key)
+## Security notes
 
-If you set `X_API_KEY`, mutating endpoints require `X-API-Key: <value>`.
+This repo intentionally demonstrates a few **secure-coding building blocks**:
+- **Optional API key** protection for Perfect System endpoints (set `X_API_KEY` in `docker-compose.yml` and include `X-API-Key` header).
+- **HTTP Basic Auth** for the FastAPI dashboard (constant-time compare via `secrets.compare_digest`).
+- **Audit logging** to SQLite for security-relevant actions (chaos, failover, reset, etc.).
+- Sensitive values (email credentials) are read from environment variables (`.env`).
 
-Where to set:
-- `docker-compose.yml` (API / Controller / Agent)
-
----
-
-## Metrics
-
-The Controller exposes `/metrics` in Prometheus text format, including:
-- ready pods / desired pods / total pods per service
-- restart counters
-- event counters by service and level
-
-The API proxies this at: `http://localhost:8080/metrics`.
+Limitations (by design):
+- The FastAPI demo uses a **hard-coded** admin user/pass for classroom simplicity — treat it as a demo, not production.
+- The Perfect System is a simulation and does not implement full Kubernetes semantics.
 
 ---
 
-## Email alerts (optional)
+## Tests (pytest)
 
-When configured, the **Controller** sends an email when a service transitions:
+### Run
+```bash
+pytest -q
+```
 
-- **DOWN**: desired replicas > 0 and **ready < desired**
-- **UP**: ready **>= desired** again
+### With coverage
+```bash
+pytest --cov --cov-report=term-missing
+```
 
-### Configure (Controller env vars)
-
-Set these under the `controller:` service in `docker-compose.yml`:
-
-- `SMTP_HOST`
-- `SMTP_PORT` (default `587`)
-- `SMTP_SECURE` (`true` for 465, otherwise usually `false`)
-- `SMTP_USER` / `SMTP_PASS` (optional, depending on SMTP server)
-- `EMAIL_FROM` (default `perfect-system@localhost`)
-- `EMAIL_TO` (comma-separated recipients)
-- `EMAIL_SUBJECT_PREFIX` (default `[Perfect System] `)
-- `PUBLIC_UI_URL` (optional link included in email)
-
-Alert behavior knobs:
-- `ALERT_DOWN_CONFIRM_MS` / `ALERT_UP_CONFIRM_MS` (default `0`)
-- `ALERT_COOLDOWN_MS` (default `0`)
-- `ALERT_STARTUP_GRACE_MS` (default `5000`)
-
-### Duplicate-email fix (included)
-
-This project version prevents duplicates by:
-- **Blocking overlapping reconcile ticks** (no concurrent reconcile loops).
-- **De-duplicating `EMAIL_TO` recipients** (same address won’t receive twice).
+### What the tests cover
+- `tests/test_main_py.py`
+  - Dashboard requires Basic Auth (`/`)
+  - Audit logging writes rows to SQLite
+  - Health-check helper returns OK vs DOWN behavior (patched requests)
+- `tests/test_services.py`
+  - v1/v2 CPU simulation + reset endpoints
+  - v1/v2 corruption makes root and health fail, then recovery after reset
+  - v3 root + health are stable
+- `tests/conftest.py`
+  - Provides a minimal **docker module stub** so `main.py` can be imported during tests without a Docker daemon.
 
 ---
 
 ## Project structure
 
 ```
-.
+Team32-ServiceReconciler/
 ├─ docker-compose.yml
-├─ examples/
-│  ├─ api-v1.yaml
-│  ├─ api-v2.yaml
-│  └─ api-canary.yaml
-└─ services/
-   ├─ api/         # UI + REST endpoints + SSE + Swagger
-   ├─ controller/  # reconcile loop + metrics + email alerts
-   ├─ agent/       # simulated pods + probe endpoints
-   ├─ v1/ v2/ v3/  # (optional) FastAPI demo services (not used by docker-compose)
+├─ examples/                 # YAML examples to apply
+├─ services/
+│  ├─ api/                   # Express API + Tron UI
+│  ├─ controller/            # Reconcile loop + metrics + optional email alerts
+│  ├─ agent/                 # Simulated cluster runtime (pods)
+│  ├─ v1/ v2/ v3/            # FastAPI demo services for the Python dashboard
+├─ main.py                   # Secure Failover Monitor dashboard (FastAPI)
+├─ tests/                    # pytest suite
+├─ requirements.txt
+├─ requirements-dev.txt
+└─ LICENSE.txt
 ```
 
 ---
 
 ## Troubleshooting
 
-### “No email is sent”
-- Ensure `SMTP_HOST` is set and `EMAIL_TO` is non-empty.
-- Check controller logs for SMTP errors (`Email send failed: ...`).
+### UI loads, but nothing changes
+- Ensure all 3 Docker services are up: `docker compose ps`
+- Check logs: `docker compose logs -f --tail=200`
+
+### API returns 401 Unauthorized
+- You likely enabled `X_API_KEY`. Send a header:
+  ```bash
+  curl -H "X-API-Key: changeme" ...
+  ```
+
+### “No email is sent” (Controller or FastAPI demo)
+- Verify SMTP credentials and recipient.
+- For Gmail, you typically need an **App Password** (2FA enabled).
+
+### Ports already in use
+- Perfect System uses `8080/8090/8070`
+- FastAPI demo uses `8000/8001/8002/8003`
 
 ---
 
-## License / usage
+## License
 
-Licensed under the MIT License.
+MIT — see `LICENSE.txt`.
