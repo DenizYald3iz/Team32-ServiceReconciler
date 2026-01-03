@@ -160,8 +160,8 @@ def monitor_loop():
                 cursor.execute("INSERT INTO health_logs (timestamp, service, status, latency) VALUES (?, ?, ?, ?)",
                                (datetime.now().strftime("%H:%M:%S"), name, "AKTİF" if is_alive else "KAPALI", latency))
             conn.commit(); conn.close()
-        except: pass
-        time.sleep(1.5)
+        except Exception as e:
+            log_audit("SİSTEM (AI)", "RESTART_HATA", str(e))
 
 @app.on_event("startup")
 def startup():

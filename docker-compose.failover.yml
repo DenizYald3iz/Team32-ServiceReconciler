@@ -1,0 +1,18 @@
+services:
+  v1:
+    build: ./services/v1
+    container_name: my-v1-container
+    ports:
+      - "8001:80"
+
+  v2:
+    build: ./services/v2
+    container_name: my-v2-container
+    ports:
+      - "8002:80"
+
+  v3:
+    build: ./services/v3
+    container_name: my-v3-container
+    ports:
+      - "8003:80"
